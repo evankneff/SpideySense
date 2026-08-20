@@ -9,8 +9,6 @@
 use crate::config::Config;
 use crate::windows::Rect;
 use anyhow::{anyhow, Context, Result};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use tauri::{
     AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl, WebviewWindowBuilder,
     WindowEvent,
@@ -52,9 +50,16 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, config: &Config) {
         close(app);
         return;
     }
-    if let Err(e) = open(app, config) {
-        warn!("could not open the camera picker: {e:#}");
-    }
+
+    // The global-shortcut callback is an event handler, so building the window here
+    // risks the same WebView2 deadlock that froze the app when picking a camera.
+    let app = app.clone();
+    let config = config.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = open(&app, &config) {
+            warn!("could not open the camera picker: {e:#}");
+        }
+    });
 }
 
 fn open<R: Runtime>(app: &AppHandle<R>, config: &Config) -> Result<()> {
@@ -119,23 +124,19 @@ fn open<R: Runtime>(app: &AppHandle<R>, config: &Config) -> Result<()> {
         .set_position(position)
         .context("positioning the picker")?;
 
-    // Clicking away should dismiss it, the way any launcher does. But a blur arriving
-    // *before* the window has ever held focus is not the user clicking away - it is the
-    // window failing to reach the foreground, and closing on it makes the picker flash
-    // and vanish. Only honour a blur once focus has genuinely been held at least once.
-    let had_focus = Arc::new(AtomicBool::new(false));
-    let handle = app.clone();
-    let seen = had_focus.clone();
+    // Deliberately no close-on-blur.
+    //
+    // It was tried twice and removed. WebView2 finishes initialising roughly 400ms after
+    // the window appears and takes focus with it, which is indistinguishable from the
+    // user clicking away - the picker gained focus, lost it, and closed itself before it
+    // could be used. Guarding on "has it ever held focus" did not help, because it had.
+    //
+    // Focus transitions are logged so the behaviour can be revisited with evidence
+    // rather than another guess. Dismissal is by the hotkey, Esc, or picking a camera,
+    // all of which are reliable.
     window.on_window_event(move |event| {
         if let WindowEvent::Focused(focused) = event {
-            if *focused {
-                seen.store(true, Ordering::Relaxed);
-            } else if seen.load(Ordering::Relaxed) {
-                debug!("camera picker lost focus; closing");
-                close(&handle);
-            } else {
-                debug!("ignoring blur before the picker ever held focus");
-            }
+            debug!(focused, "camera picker focus changed");
         }
     });
 

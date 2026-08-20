@@ -3,8 +3,7 @@
 //! All three are fire-and-forget from the page's point of view: it never waits on a
 //! result, so a failure here degrades the interaction rather than breaking the popup.
 
-use crate::{picker, windows, AppState};
-use std::time::Instant;
+use crate::{lifecycle, picker, windows, AppState};
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_opener::OpenerExt;
 use tracing::{debug, error, info, warn};
@@ -69,10 +68,14 @@ pub fn picker_choose<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>, 
     };
 
     info!(%camera, "opening a pinned popup from the picker");
-    let mut popups = state.popups();
-    if let Err(e) = popups.open_pinned(&app, &state.config, &config_camera, Instant::now()) {
-        warn!(%camera, "could not open the popup: {e:#}");
-    }
+    // Off this thread: creating a window inside a synchronous command deadlocks on
+    // Windows, which froze the whole app.
+    lifecycle::spawn_open_pinned(
+        app.clone(),
+        state.config.clone(),
+        state.popups.clone(),
+        config_camera,
+    );
 }
 
 /// Dismisses the picker without choosing anything.

@@ -11,6 +11,7 @@
 use crate::config::{Camera, Config, Popup};
 use crate::windows;
 use anyhow::Result;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, Runtime};
 use tracing::{debug, info, warn};
@@ -242,6 +243,32 @@ impl Popups {
             .map(|(i, e)| (e.camera.clone(), i))
             .collect()
     }
+}
+
+/// Opens a pinned popup from a thread that is safe to create windows on.
+///
+/// WebviewWindowBuilder::build deadlocks on Windows when called from a synchronous Tauri
+/// command or an event handler - the documented workaround is to create windows from an
+/// async context or a separate thread. Detection popups never hit this because they are
+/// created from the MQTT task; the tray and the picker both do, so they route through here.
+pub fn spawn_open_pinned<R: Runtime>(
+    app: AppHandle<R>,
+    config: Arc<Config>,
+    popups: Arc<Mutex<Popups>>,
+    camera: Camera,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut guard = match popups.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                warn!("popup state lock was poisoned; recovering");
+                poisoned.into_inner()
+            }
+        };
+        if let Err(e) = guard.open_pinned(&app, &config, &camera, Instant::now()) {
+            warn!(camera = %camera.name, "could not open the pinned popup: {e:#}");
+        }
+    });
 }
 
 fn close_window<R: Runtime>(app: &AppHandle<R>, camera: &str) {

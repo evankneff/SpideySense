@@ -3,7 +3,6 @@
 
 use crate::AppState;
 use anyhow::{Context, Result};
-use std::time::Instant;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
@@ -239,10 +238,14 @@ fn show_camera<R: Runtime>(app: &AppHandle<R>, camera: &str) {
     };
 
     info!(camera, "opening a pinned popup from the tray");
-    let mut popups = state.popups();
-    if let Err(e) = popups.open_pinned(app, &state.config, &config_camera, Instant::now()) {
-        warn!(camera, "could not open the popup: {e:#}");
-    }
+    // A tray menu handler is an event handler, which has the same window-creation
+    // deadlock on Windows as a synchronous command.
+    crate::lifecycle::spawn_open_pinned(
+        app.clone(),
+        state.config.clone(),
+        state.popups.clone(),
+        config_camera,
+    );
 }
 
 fn reveal<R: Runtime>(app: &AppHandle<R>, path: &str) {
