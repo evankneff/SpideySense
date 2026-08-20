@@ -30,6 +30,7 @@ Version 1.0 · Last updated 2026-08-20 · Package versions verified 2026-08-20
 | anyhow / thiserror | 1.x / 2.x | Error handling; thiserror for typed config errors |
 | tracing + tracing-subscriber + tracing-appender | 0.1 / 0.3 / 0.2 | Rotating daily logs |
 | dirs | 6.0 | Locating `%APPDATA%` |
+| tauri-plugin-global-shortcut | 2.3.2 | The camera picker hotkey |
 | windows | 0.61.3 | Win32 only, under `[target.'cfg(windows)'.dependencies]` |
 
 ### Deliberately excluded
@@ -143,7 +144,8 @@ aiDocs/                        project documentation
 ai/                            roadmaps, guides, notes
 assets/gen-icon.js             generates icon PNGs from scratch, no image deps
 src/
-  popup.html                   the entire frontend: snapshot, WebRTC, header, controls
+  popup.html                   snapshot, WebRTC, header, controls
+  picker.html                  keyboard camera picker
   index.html                   placeholder; Tauri requires a frontendDist
 src-tauri/
   examples/
@@ -159,6 +161,7 @@ src-tauri/
     events.rs                  Frigate schema + trigger decision (pure, unit-tested)
     mqtt.rs                    client, backoff, cadence measurement, dispatch
     lifecycle.rs               popup deadlines, stacking, sweep (pure timing)
+    picker.rs                  global-hotkey camera picker (the one focused window)
     windows.rs                 window creation, placement math, focus suppression
     tray.rs                    tray icon, camera picker, DND, autostart
     commands.rs                the three commands popup.html invokes

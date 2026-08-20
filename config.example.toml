@@ -133,6 +133,26 @@ labels = ["person", "bird"]
 
 
 # ---------------------------------------------------------------------------
+# Global hotkey - keyboard camera picker
+# ---------------------------------------------------------------------------
+[hotkey]
+# Press the binding anywhere to open a keyboard-navigable camera list; press it
+# again (or Esc, or click away) to dismiss it. Up/Down to move, Enter to open,
+# or 1-9 to jump straight to a camera.
+#
+# This is the one window in the app that deliberately takes keyboard focus - it
+# cannot read arrow keys otherwise. Detection popups never do.
+# enabled = true
+
+# Any accelerator the Tauri global-shortcut plugin accepts, e.g. "F20",
+# "CmdOrCtrl+Shift+C", "Alt+Space". F20 is the default because Windows binds
+# nothing to it and most keyboards have no physical key for it, which makes it a
+# clean target for a macro key. Registration fails harmlessly if another app
+# already owns the combination - check the log.
+# binding = "F20"
+
+
+# ---------------------------------------------------------------------------
 # Cameras
 # ---------------------------------------------------------------------------
 # `name`   must match the Frigate camera name exactly - it is compared against

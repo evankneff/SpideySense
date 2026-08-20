@@ -1,0 +1,147 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>frigate-popup camera picker</title>
+<style>
+  :root {
+    --bg: #1b1f24;
+    --row: #232830;
+    --sel: #ff6b35;
+    --ink: #f2f4f6;
+    --dim: #9aa4b0;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font: 500 13px/1.2 "Segoe UI", system-ui, sans-serif;
+    user-select: none;
+    overflow: hidden;
+    border: 1px solid #000;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 9px 12px 7px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  h1 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .hint { font-size: 10px; color: var(--dim); letter-spacing: .03em; margin-left: auto; }
+
+  ul { list-style: none; margin: 0; padding: 6px; }
+  li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    height: 34px;
+    border-radius: 5px;
+    background: transparent;
+    cursor: pointer;
+  }
+  li.sel { background: var(--sel); color: #1b1f24; }
+  li.sel .num, li.sel .off { color: rgba(27,31,36,.7); }
+
+  .num {
+    font-size: 10px;
+    color: var(--dim);
+    width: 12px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .name { text-transform: capitalize; flex: 1; }
+  .off { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+</style>
+
+<header>
+  <h1>Show camera</h1>
+  <span class="hint">&uarr;&darr; select &middot; Enter open &middot; Esc close</span>
+</header>
+<ul id="list"></ul>
+
+<script>
+(() => {
+  "use strict";
+
+  const P = window.__PICKER__ || { cameras: [] };
+  const cameras = P.cameras || [];
+  const invoke = window.__TAURI__?.core?.invoke;
+  const call = (cmd, args) => { try { invoke && invoke(cmd, args); } catch (_) {} };
+
+  const list = document.getElementById("list");
+  let sel = 0;
+
+  cameras.forEach((cam, i) => {
+    const li = document.createElement("li");
+    li.dataset.index = i;
+
+    const num = document.createElement("span");
+    num.className = "num";
+    // Only the first nine get a number, because only those have a shortcut key.
+    num.textContent = i < 9 ? String(i + 1) : "";
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = cam.name.replace(/_/g, " ");
+
+    li.append(num, name);
+
+    if (!cam.enabled) {
+      const off = document.createElement("span");
+      off.className = "off";
+      off.textContent = "alerts off";
+      li.append(off);
+    }
+
+    li.addEventListener("mousemove", () => paint(i));
+    li.addEventListener("click", () => choose(i));
+    list.append(li);
+  });
+
+  const rows = [...list.children];
+
+  function paint(i) {
+    if (i === sel) return;
+    rows[sel]?.classList.remove("sel");
+    sel = i;
+    rows[sel]?.classList.add("sel");
+  }
+
+  function move(delta) {
+    if (!rows.length) return;
+    // Wraps, so holding one arrow key cycles rather than dead-ending.
+    paint((sel + delta + rows.length) % rows.length);
+    rows[sel].scrollIntoView({ block: "nearest" });
+  }
+
+  function choose(i) {
+    const cam = cameras[i];
+    if (!cam) return;
+    call("picker_choose", { camera: cam.name });
+  }
+
+  document.addEventListener("keydown", (ev) => {
+    switch (ev.key) {
+      case "ArrowDown": ev.preventDefault(); move(1); break;
+      case "ArrowUp": ev.preventDefault(); move(-1); break;
+      case "Home": ev.preventDefault(); paint(0); break;
+      case "End": ev.preventDefault(); paint(rows.length - 1); break;
+      case "Enter": ev.preventDefault(); choose(sel); break;
+      case "Escape": ev.preventDefault(); call("picker_close"); break;
+      default:
+        // 1-9 jump straight to a camera without arrowing to it.
+        if (/^[1-9]$/.test(ev.key)) {
+          const i = Number(ev.key) - 1;
+          if (i < rows.length) { ev.preventDefault(); paint(i); choose(i); }
+        }
+    }
+  });
+
+  rows[0]?.classList.add("sel");
+  // The window is focused on creation, but the document still needs focus for keydown.
+  window.focus();
+  document.body.focus();
+})();
+</script>

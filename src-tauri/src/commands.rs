@@ -3,11 +3,11 @@
 //! All three are fire-and-forget from the page's point of view: it never waits on a
 //! result, so a failure here degrades the interaction rather than breaking the popup.
 
-use crate::windows;
-use crate::AppState;
+use crate::{picker, windows, AppState};
+use std::time::Instant;
 use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_opener::OpenerExt;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Opens this camera in the Frigate web UI, in the default browser.
 #[tauri::command]
@@ -54,4 +54,29 @@ fn restack<R: Runtime>(app: &AppHandle<R>, state: &State<'_, AppState>) {
             warn!(camera, slot, "could not restack after dismissal: {e:#}");
         }
     }
+}
+
+/// Opens the chosen camera as a pinned live view and dismisses the picker.
+#[tauri::command]
+pub fn picker_choose<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>, camera: String) {
+    // Close first: the picker holds focus, and opening the popup underneath it would
+    // leave the picker covering the thing the user just asked to see.
+    picker::close(&app);
+
+    let Some(config_camera) = state.config.camera(&camera).cloned() else {
+        error!(%camera, "picker chose a camera that is not in the config");
+        return;
+    };
+
+    info!(%camera, "opening a pinned popup from the picker");
+    let mut popups = state.popups();
+    if let Err(e) = popups.open_pinned(&app, &state.config, &config_camera, Instant::now()) {
+        warn!(%camera, "could not open the popup: {e:#}");
+    }
+}
+
+/// Dismisses the picker without choosing anything.
+#[tauri::command]
+pub fn picker_close<R: Runtime>(app: AppHandle<R>) {
+    picker::close(&app);
 }

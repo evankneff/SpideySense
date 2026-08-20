@@ -2,6 +2,16 @@ This is meant to be a CONCISE list of changes to track as we develop this projec
 
 ---
 
+## 2026-08-20 — Keyboard camera picker
+
+- Global hotkey (default F20) toggles a keyboard-navigable camera list.
+  Up/Down wrap, Home/End, 1-9 jump, Enter opens, Esc dismisses, click-away dismisses.
+- Selecting opens a pinned live view, same as the tray picker.
+- `tauri-plugin-global-shortcut` 2.3.2; binding is a config string parsed by the plugin,
+  so any accelerator it accepts works. Registration failure is logged, not fatal.
+- The picker is the one window that deliberately takes focus. Kept as a separate window
+  type (`camera-picker`) so the never-steal-focus rule stays absolute for popups.
+
 ## 2026-08-20 — v1 complete
 
 Initial build, milestones 1-6. See

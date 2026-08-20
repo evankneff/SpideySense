@@ -50,9 +50,9 @@ against the live Frigate instance, not just unit-tested.
 | 5. Snapshot-first local page, WebRTC | Done |
 | 6. Do-not-disturb, autostart, click-through, hover-pause | Done |
 
-Added beyond the original scope: a tray camera picker (pinned live views), `--preview`
-and `--simulate` flags, and two example binaries (`discover_cameras`,
-`publish_test_event`).
+Added beyond the original scope: a tray camera picker and a global-hotkey keyboard
+picker (both open pinned live views), `--preview` and `--simulate` flags, and two example
+binaries (`discover_cameras`, `publish_test_event`).
 
 60 unit tests, clippy clean with `-D warnings`.
 
@@ -90,7 +90,9 @@ Development process rules:
 
 ## Hard Constraints — Never Violate Without Asking
 
-- **Popups must never take keyboard focus.** `.focused(false)` alone is not sufficient
+- **Popups must never take keyboard focus.** The `camera-picker` window is the single
+  deliberate exception, because the user summoned it and it cannot read arrow keys
+  otherwise. It is a separate window type so the exception cannot leak into popups. `.focused(false)` alone is not sufficient
   on Windows; `WS_EX_NOACTIVATE` is applied to the HWND before the window is shown. Do
   not remove it, and do not call `set_focus()` on a popup.
 - **No credentials in source or in the repo.** The MQTT password lives in `config.toml`

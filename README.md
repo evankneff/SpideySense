@@ -21,6 +21,7 @@ config.example.toml     commented reference config (compiled into the binary)
 assets/gen-icon.js      generates the icon PNGs from scratch, no image deps
 src/
   popup.html            the popup page: snapshot-first, WebRTC, header, close button
+  picker.html           the keyboard camera picker
 src-tauri/
   src/
     main.rs             entry point; no console in release builds
@@ -34,6 +35,7 @@ src-tauri/
     mqtt.rs             MQTT client, reconnect/backoff, decision logging
     commands.rs         the three commands the popup page invokes
     tray.rs             tray icon, camera picker, menu
+    picker.rs           the global-hotkey camera picker window
     windows.rs          popup creation, placement math, focus suppression
     ui.rs               native message boxes for fatal startup errors
   icons/                app icon + tray icon variants
@@ -191,6 +193,32 @@ stylesheet, if the bundled page ever misbehaves.
 | **Launch at login** | via `tauri-plugin-autostart`. The tick is read from the real registry state on every menu build, so it stays correct if changed outside the app. |
 | **Open config file / Open log file** | opens the current file in the default handler |
 | **Quit** | the only thing that exits the process |
+
+## Keyboard camera picker
+
+Press **F20** (configurable via `[hotkey] binding`) anywhere to open a keyboard-navigable
+camera list. Press it again to dismiss.
+
+| Key | Action |
+|---|---|
+| Up / Down | move the selection, wrapping at both ends |
+| Home / End | first / last camera |
+| 1-9 | jump straight to that camera and open it |
+| Enter | open the selected camera |
+| Esc | dismiss |
+
+Clicking away also dismisses it, the way any launcher does.
+
+**This is the only window in the app that takes keyboard focus, deliberately.** It cannot
+read arrow keys otherwise. It is a separate window type from the popups (`camera-picker`
+rather than `popup-*`) specifically so that exception cannot leak into them — detection
+popups still carry `WS_EX_NOACTIVATE` and can never steal focus.
+
+Selecting a camera opens it as a **pinned** live view, the same as the tray picker: no
+auto-close, no cooldown, no detection badge.
+
+If the binding is already owned by another application, registration fails, the reason is
+logged, and the rest of the app carries on working.
 
 ## Tray camera picker
 

@@ -10,6 +10,7 @@ mod lifecycle;
 mod logging;
 mod mqtt;
 mod paths;
+mod picker;
 #[cfg(test)]
 mod testutil;
 mod tray;
@@ -165,6 +166,47 @@ fn preview_targets<'a>(config: &'a Config, requested: &[String]) -> Result<Vec<&
         .collect()
 }
 
+/// Registers the global hotkey that toggles the camera picker.
+///
+/// Registration fails if another application already owns the combination, which is why
+/// it is reported rather than propagated - the app is still useful without it.
+fn register_hotkey<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    config: Arc<Config>,
+) -> Result<()> {
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+    if !config.hotkey.enabled {
+        info!("camera picker hotkey disabled in config");
+        return Ok(());
+    }
+
+    let binding = config.hotkey.binding.trim().to_string();
+    let shortcut = Shortcut::from_str(&binding)
+        .with_context(|| format!("`{binding}` is not a valid shortcut"))?;
+
+    let for_handler = config.clone();
+    app.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(move |app, _shortcut, event| {
+                // Pressed only. Acting on Released too would toggle twice per keypress.
+                if event.state() == ShortcutState::Pressed {
+                    picker::toggle(app, &for_handler);
+                }
+            })
+            .build(),
+    )
+    .context("registering the global shortcut plugin")?;
+
+    app.global_shortcut()
+        .register(shortcut)
+        .with_context(|| format!("registering `{binding}` (is another app using it?)"))?;
+
+    info!(binding = %binding, "camera picker hotkey registered");
+    Ok(())
+}
+
 /// Closes expired popups on a fixed tick.
 ///
 /// A single sweeper rather than a timer per popup: extending a deadline is then just a
@@ -213,6 +255,8 @@ fn start(config: Arc<Config>, mode: cli::Mode) -> Result<()> {
             commands::popup_open_ui,
             commands::popup_dismiss,
             commands::popup_hover,
+            commands::picker_choose,
+            commands::picker_close,
         ])
         .setup(move |app| {
             let triggers = Arc::new(Mutex::new(Triggers::new()));
@@ -224,6 +268,11 @@ fn start(config: Arc<Config>, mode: cli::Mode) -> Result<()> {
             });
             tray::create(app.handle())?;
             info!("tray icon ready");
+
+            if let Err(e) = register_hotkey(app.handle(), config.clone()) {
+                // A hotkey conflict must not stop the app; detections still work.
+                error!("camera picker hotkey unavailable: {e:#}");
+            }
 
             let context = || mqtt::Context {
                 app: app.handle().clone(),

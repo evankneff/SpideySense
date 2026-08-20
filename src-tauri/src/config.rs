@@ -45,7 +45,30 @@ pub struct Config {
     #[serde(default)]
     pub detection: Detection,
     #[serde(default)]
+    pub hotkey: Hotkey,
+    #[serde(default)]
     pub cameras: Vec<Camera>,
+}
+
+/// Global hotkey for the keyboard camera picker.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Hotkey {
+    pub enabled: bool,
+    /// Accelerator string, e.g. "F20", "CmdOrCtrl+Shift+C". Parsed by the
+    /// global-shortcut plugin, so anything it accepts works here.
+    pub binding: String,
+}
+
+impl Default for Hotkey {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            // F20 has no default binding on Windows and no physical key on most
+            // keyboards, which makes it a safe target for a macro key.
+            binding: "F20".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -356,6 +379,10 @@ impl Config {
                 self.popup.video_fit,
                 FITS.join(", ")
             ));
+        }
+
+        if self.hotkey.enabled && self.hotkey.binding.trim().is_empty() {
+            p.push("hotkey.binding is empty; set a key or use hotkey.enabled = false".into());
         }
 
         if self.detection.labels.is_empty() {
