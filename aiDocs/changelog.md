@@ -12,6 +12,15 @@ This is meant to be a CONCISE list of changes to track as we develop this projec
 - The picker is the one window that deliberately takes focus. Kept as a separate window
   type (`camera-picker`) so the never-steal-focus rule stays absolute for popups.
 
+## 2026-08-20 — Picker focus and placement fixes
+
+- Picker appeared then vanished instantly: a global hotkey is not input to this process,
+  so `SetForegroundWindow` was refused, the window never gained focus, and the
+  blur-to-close handler fired immediately. Fixed with `AttachThreadInput` activation plus
+  ignoring any blur that arrives before focus was ever held.
+- Moved from screen centre to just above the tray (bottom-right of the primary monitor's
+  work area), matching where a tray context menu opens.
+
 ## 2026-08-20 — v1 complete
 
 Initial build, milestones 1-6. See

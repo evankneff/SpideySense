@@ -70,6 +70,18 @@ on the HWND via `SetWindowLongPtrW`, **before** the window is shown. Tauri and t
 may link different `windows` crate versions, so the handle is rebuilt as
 `HWND(window.hwnd()?.0)` — a newtype over the same raw pointer either way.
 
+### Global hotkey focus (Windows)
+
+A global hotkey does not count as input to the receiving process, so Windows refuses
+`SetForegroundWindow` and the picker appears unfocused. `picker.rs::force_foreground`
+uses the standard workaround: `AttachThreadInput` (in `Win32::System::Threading`, not
+`WindowsAndMessaging`) to join the foreground window's input queue for the duration of
+the activation, then detach.
+
+Independently, the blur-to-close handler ignores any `Focused(false)` that arrives before
+a `Focused(true)` — a blur before the window ever held focus is a failed activation, not
+the user clicking away, and closing on it makes the picker flash and disappear.
+
 ### rumqttc
 
 - **`set_max_packet_size(1 MB, 64 KB)` is mandatory.** The default incoming limit is

@@ -207,7 +207,17 @@ camera list. Press it again to dismiss.
 | Enter | open the selected camera |
 | Esc | dismiss |
 
-Clicking away also dismisses it, the way any launcher does.
+It opens just above the tray, at the bottom-right of the primary monitor's work area —
+the same place a tray context menu appears. Clicking away dismisses it, the way any
+launcher does.
+
+Two Windows details make it work. A global hotkey does not count as input to this
+process, so `SetForegroundWindow` is refused and the window would appear without focus;
+`picker.rs::force_foreground` attaches this thread's input queue to the current
+foreground thread for the duration of the call to get around that. And a blur arriving
+*before* the window has ever held focus is ignored, because that is the window failing to
+activate rather than the user clicking away — honouring it made the picker flash and
+vanish.
 
 **This is the only window in the app that takes keyboard focus, deliberately.** It cannot
 read arrow keys otherwise. It is a separate window type from the popups (`camera-picker`
