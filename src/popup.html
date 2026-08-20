@@ -1,0 +1,289 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>frigate-popup</title>
+<style>
+  :root {
+    /* Kept for the detection badge only - the window itself carries no coloured border. */
+    --edge: #ff6b35;
+    --ink: #f2f4f6;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    font: 500 12px/1.2 "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    user-select: none;
+    cursor: pointer;
+  }
+  #stage { position: absolute; inset: 0; }
+
+  /* Snapshot and video occupy the same box; the video fades in over the snapshot
+     once it actually has frames, so there is never a black gap or a visible swap. */
+  #snap, #video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: var(--fit, cover);
+    opacity: 0;
+    transition: opacity 220ms ease-out;
+  }
+  #snap.on, #video.on { opacity: 1; }
+  #video.on + #snap, #snap.hidden { opacity: 0; }
+
+  /* A neutral hairline, not an accent: without it a bright daytime frame bleeds into a
+     light desktop and the borderless window loses its edge. Delete this rule for a
+     completely edgeless popup. */
+  #frame {
+    position: absolute;
+    inset: 0;
+    border: 1px solid rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+    z-index: 3;
+  }
+
+  #bar {
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    background: linear-gradient(180deg, rgba(0,0,0,.78), rgba(0,0,0,0));
+    text-shadow: 0 1px 3px rgba(0,0,0,.9);
+  }
+  #camera { font-weight: 700; letter-spacing: .02em; text-transform: capitalize; }
+  #label[hidden] { display: none; }
+  #label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--edge);
+    color: #1b1f24;
+    font-weight: 700;
+  }
+  #spacer { flex: 1; }
+  #time { opacity: .75; font-variant-numeric: tabular-nums; }
+
+  #close {
+    z-index: 4;
+    cursor: pointer;
+    width: 20px; height: 20px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 4px;
+    background: rgba(255,255,255,.12);
+    color: var(--ink);
+    font: 700 13px/1 system-ui, sans-serif;
+    padding: 0;
+  }
+  #close:hover { background: rgba(255,80,80,.85); }
+
+  /* Bottom-left status, only while the live stream has not taken over yet. */
+  #status {
+    position: absolute;
+    left: 9px; bottom: 8px;
+    z-index: 2;
+    font-size: 10px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    opacity: .8;
+    text-shadow: 0 1px 3px rgba(0,0,0,.9);
+    transition: opacity 200ms;
+  }
+  #status.gone { opacity: 0; }
+  #dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #ffc107;
+    margin-right: 5px;
+    vertical-align: baseline;
+  }
+  #dot.live { background: #35d07f; }
+</style>
+
+<div id="stage">
+  <img id="snap" alt="" />
+  <video id="video" autoplay muted playsinline></video>
+  <div id="bar">
+    <span id="camera"></span>
+    <span id="label"></span>
+    <span id="spacer"></span>
+    <span id="time"></span>
+    <button id="close" title="Close">&#10005;</button>
+  </div>
+  <div id="status"><span id="dot"></span><span id="stext">connecting</span></div>
+  <div id="frame"></div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // Injected by the Rust side via initialization_script, so there is no query-string
+  // parsing or URL escaping to get wrong. The query-string fallback exists purely so the
+  // page can be opened in a normal browser for debugging.
+  const P = window.__POPUP__ || Object.fromEntries(new URLSearchParams(location.search));
+  const camera = P.camera || "camera";
+  const stream = P.stream || "";
+  const base = (P.go2rtc || "").replace(/\/+$/, "");
+  const invoke = window.__TAURI__?.core?.invoke;
+
+  const $ = (id) => document.getElementById(id);
+  const snap = $("snap"), video = $("video"), status = $("status"), stext = $("stext"), dot = $("dot");
+
+  document.documentElement.style.setProperty("--fit", P.fit || "cover");
+  $("camera").textContent = camera.replace(/_/g, " ");
+
+  // A live view is one you opened by hand, so it must not carry a detection label -
+  // a "PERSON" badge on a window nobody triggered reads as a false alert.
+  const isLive = P.kind === "live";
+
+  const badge = $("label");
+  if (isLive || !P.label) {
+    badge.hidden = true;
+  } else {
+    badge.textContent = P.label;
+  }
+
+  const clock = () =>
+    new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  $("time").textContent = clock();
+  // A detection popup is short-lived and its timestamp means "when this fired", so it
+  // stays put. A live view can sit open for a long time, where a frozen clock is wrong.
+  if (isLive) setInterval(() => ($("time").textContent = clock()), 1000);
+
+  const call = (cmd, args) => { try { invoke && invoke(cmd, args); } catch (_) {} };
+
+  // ---- snapshot ----------------------------------------------------------
+  // Fired in parallel with the WebRTC connect rather than before it. Measured on this
+  // setup, frame.jpeg takes 0.7-3.9s when go2rtc has to spin the producer up, so it is
+  // not reliably the faster path - whichever arrives first wins.
+  let livePlaying = false;
+  if (base && stream) {
+    snap.addEventListener("load", () => {
+      if (!livePlaying) snap.classList.add("on");
+    });
+    snap.addEventListener("error", () => stext.textContent = "no snapshot");
+    snap.src = `${base}/api/frame.jpeg?src=${encodeURIComponent(stream)}&t=${Date.now()}`;
+  }
+
+  // ---- webrtc ------------------------------------------------------------
+  // Speaks go2rtc's own signalling over /api/ws so the popup needs neither
+  // stream.html nor its scripts, which keeps the go2rtc allow_paths list to two entries.
+  let ws = null, pc = null, retries = 0, closed = false;
+
+  function goLive() {
+    if (livePlaying) return;
+    livePlaying = true;
+    video.classList.add("on");
+    snap.classList.add("hidden");
+    dot.classList.add("live");
+    stext.textContent = "live";
+    status.classList.add("gone");
+  }
+
+  function teardown() {
+    try { pc && pc.close(); } catch (_) {}
+    try { ws && ws.close(); } catch (_) {}
+    pc = null; ws = null;
+  }
+
+  function connect() {
+    if (closed || !base || !stream) return;
+    teardown();
+
+    const wsUrl = base.replace(/^http/, "ws") + `/api/ws?src=${encodeURIComponent(stream)}`;
+    ws = new WebSocket(wsUrl);
+
+    ws.addEventListener("open", () => {
+      pc = new RTCPeerConnection({ iceServers: [], sdpSemantics: "unified-plan" });
+
+      pc.addEventListener("icecandidate", (ev) => {
+        // go2rtc expects a final empty candidate to mark the end of gathering.
+        const candidate = ev.candidate ? ev.candidate.toJSON().candidate : "";
+        send({ type: "webrtc/candidate", value: candidate });
+      });
+
+      pc.addEventListener("track", (ev) => {
+        if (video.srcObject !== ev.streams[0]) video.srcObject = ev.streams[0];
+      });
+
+      pc.addEventListener("connectionstatechange", () => {
+        if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+          scheduleRetry();
+        }
+      });
+
+      // Video only: the popup is meant to be quiet, and skipping audio keeps the
+      // negotiation smaller and the connect faster.
+      pc.addTransceiver("video", { direction: "recvonly" });
+
+      pc.createOffer()
+        .then((offer) => pc.setLocalDescription(offer).then(() => offer))
+        .then((offer) => send({ type: "webrtc/offer", value: offer.sdp }))
+        .catch(() => scheduleRetry());
+    });
+
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch (_) { return; }
+      if (!pc) return;
+
+      if (msg.type === "webrtc/answer") {
+        pc.setRemoteDescription({ type: "answer", sdp: msg.value }).catch(() => scheduleRetry());
+      } else if (msg.type === "webrtc/candidate") {
+        pc.addIceCandidate({ candidate: msg.value, sdpMid: "0" }).catch(() => {});
+      } else if (msg.type === "error") {
+        stext.textContent = "stream error";
+        scheduleRetry();
+      }
+    });
+
+    ws.addEventListener("close", () => { if (!livePlaying) scheduleRetry(); });
+    ws.addEventListener("error", () => scheduleRetry());
+  }
+
+  function send(value) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value));
+  }
+
+  // A popup is short-lived, so retries stay quick and few - there is no point backing
+  // off to 30s inside a window that closes after 20.
+  function scheduleRetry() {
+    if (closed || livePlaying || retries >= 4) return;
+    retries += 1;
+    stext.textContent = `reconnecting (${retries})`;
+    setTimeout(connect, 400 * retries);
+  }
+
+  video.addEventListener("playing", goLive);
+  video.addEventListener("loadeddata", () => { if (video.videoWidth) goLive(); });
+  connect();
+
+  // ---- interactions ------------------------------------------------------
+  $("close").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closed = true;
+    teardown();
+    call("popup_dismiss", { camera });
+  });
+
+  // Clicking anywhere else opens this camera in the Frigate UI.
+  document.addEventListener("click", () => call("popup_open_ui", { camera }));
+
+  // Hovering pauses the auto-close, so a popup you are looking at does not vanish.
+  document.addEventListener("mouseenter", () => call("popup_hover", { camera, hovered: true }));
+  document.addEventListener("mouseleave", () => call("popup_hover", { camera, hovered: false }));
+
+  window.addEventListener("beforeunload", teardown);
+})();
+</script>

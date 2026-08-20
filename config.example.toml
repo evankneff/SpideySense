@@ -1,0 +1,184 @@
+# frigate-popup configuration
+#
+# Copy this to whichever location applies:
+#   Installed : %APPDATA%\frigate-popup\config.toml
+#   Portable  : config.toml sitting next to frigate-popup.exe (takes precedence)
+#
+# The app writes this file for you on first run if none exists.
+# Every commented-out setting below shows its built-in default, so you only need to
+# uncomment the ones you actually want to change.
+
+
+# ---------------------------------------------------------------------------
+# MQTT - where Frigate publishes its events
+# ---------------------------------------------------------------------------
+[mqtt]
+host = "10.0.0.213"
+# port = 1883
+username = "frigate_mqtt"
+
+# Set the password here, or leave it out and use password_env instead.
+# Setting both is a validation error.
+password = "CHANGE-ME"
+
+# Preferred if you would rather keep the secret out of this file entirely:
+# the name of an environment variable holding the password. The variable must
+# exist when the app starts, or startup fails with a clear message.
+# password_env = "FRIGATE_MQTT_PASSWORD"
+
+# client_id = "frigate-popup"
+# topic_prefix = "frigate"        # Frigate's default; we subscribe to <prefix>/events
+# keepalive_seconds = 30
+
+
+# ---------------------------------------------------------------------------
+# Where Frigate and go2rtc live
+# ---------------------------------------------------------------------------
+[frigate]
+# Used for click-through when you click a popup.
+ui_url = "https://10.0.0.193:8971"
+
+# go2rtc API. Must be reachable from this desktop - verify with:
+#   curl http://10.0.0.193:1984/api/streams
+go2rtc_url = "http://10.0.0.193:1984"
+
+
+# ---------------------------------------------------------------------------
+# Popup appearance and placement
+# ---------------------------------------------------------------------------
+[popup]
+# width = 480
+# height = 270
+
+# One of: top-left, top-right, bottom-left, bottom-right
+# corner = "bottom-right"
+
+# Distance from the chosen corner, in logical pixels.
+# offset_x = 24
+# offset_y = 24
+
+# Vertical gap between stacked popups.
+# stack_gap = 12
+
+# "primary", "cursor" (the monitor the mouse is on), or a 0-based index.
+# monitor = "primary"
+
+# Lifecycle. A popup lives as long as the object is actually doing something:
+#   `new` opens it, each `update` pushes the deadline out, and `end` (or the object
+#   going stationary) starts the linger countdown.
+#
+# Floor on time on screen, so it never blinks away if `end` lands immediately.
+# min_display_seconds = 8
+#
+# Grace period after the object ends or goes stationary.
+# linger_seconds = 15
+#
+# Close if no `update` arrives for this long. Covers a dropped `end` event.
+# Measured on this setup: updates arrive every ~200ms (p90 670ms) while someone is
+# moving, and `end` lands 2.4-6.0s after the last update - so anything above ~10s
+# is safe headroom.
+# watchdog_seconds = 20
+#
+# Absolute ceiling, whatever the events say. Stops a parked car or someone standing
+# still from pinning a window indefinitely.
+# max_display_seconds = 120
+
+# Beyond this many at once, the oldest popup is replaced.
+# max_popups = 2
+
+# go2rtc player mode. Comma-separated values are tried in order.
+# WebRTC needs UDP or TCP 8555 open on the Frigate host; "webrtc,mse" falls back
+# to MSE over the 1984 WebSocket if WebRTC cannot connect.
+# stream_mode = "webrtc"
+
+# How the video fills the popup:
+#   cover   - fill the window, cropping whatever does not fit (default)
+#   contain - letterbox, showing the whole frame with black bars
+#   fill    - stretch to fit, distorting the aspect ratio
+# Worth knowing: doorbell_sub is 896x672 (4:3), so in a 16:9 popup "contain" leaves
+# noticeable bars down both sides while "cover" crops the timestamp banner off the top.
+# video_fit = "cover"
+
+# Which page a popup loads:
+#   local  - the bundled page (default). Shows the latest snapshot instantly, then fades
+#            to live WebRTC, and draws its own header, close button and border. Talks to
+#            go2rtc directly over /api/ws, so it needs no go2rtc UI files at all.
+#   go2rtc - go2rtc's own stream.html, restyled from the outside. Kept as a fallback if
+#            the bundled page ever misbehaves.
+# page = "local"
+
+# go2rtc paints its own mode badge ("RTC" / "MSE") in the corner of its player. Only
+# applies when page = "go2rtc"; the bundled page has its own status indicator.
+# show_stream_badge = false
+
+
+# ---------------------------------------------------------------------------
+# What counts as a trigger
+# ---------------------------------------------------------------------------
+[detection]
+# Object labels that open a popup. Frigate labels are lowercase, e.g. person, car, dog,
+# cat, bird.
+#
+# This only filters what Frigate already publishes - Frigate itself has to be tracking the
+# label first. Check the `objects: track:` list in frigate.yaml; if `bird` is not in there,
+# no bird event is ever published and this list cannot conjure one.
+labels = ["person", "bird"]
+
+# Per-camera quiet period after a popup fires, so one person walking around does
+# not produce a stream of windows.
+# cooldown_seconds = 60
+
+# Frigate marks some tracked objects as false positives; skip those.
+# ignore_false_positives = true
+
+
+# ---------------------------------------------------------------------------
+# Cameras
+# ---------------------------------------------------------------------------
+# `name`   must match the Frigate camera name exactly - it is compared against
+#          `after.camera` in the MQTT event. Check yours with:
+#            mosquitto_sub -h 10.0.0.213 -u frigate_mqtt -P '<pw>' -t 'frigate/events' -v
+# `stream` is the go2rtc stream name. List yours with:
+#            curl http://10.0.0.193:1984/api/streams
+#          Sub streams are the right choice for a small popup: lower bitrate and
+#          they connect noticeably faster than the main streams.
+#
+#          Note the Frigate names and the go2rtc stream names do NOT match on this
+#          setup: Frigate calls them front_doorbell / garage_camera / side_camera while
+#          go2rtc calls the same feeds doorbell / garage / sidedoor.
+#
+#          Run `cargo run --example discover_cameras` to list the Frigate names.
+#
+# Optional per-camera keys: enabled, labels, required_zones, cooldown_seconds.
+
+[[cameras]]
+name = "front_doorbell"
+stream = "doorbell_sub"
+
+[[cameras]]
+name = "garage_camera"
+stream = "garage_sub"
+
+[[cameras]]
+name = "side_camera"
+stream = "sidedoor_sub"
+
+[[cameras]]
+name = "indoor_garage"
+stream = "indoor_garage_sub"
+enabled = false            # indoor cameras off by default - you are usually the person
+
+[[cameras]]
+name = "indoor_living_room"
+stream = "indoor_living_room_sub"
+enabled = false
+
+# Fuller example of the per-camera overrides:
+#
+# [[cameras]]
+# name = "driveway"
+# stream = "driveway_sub"
+# enabled = true
+# labels = ["person", "car"]      # overrides detection.labels for this camera only
+# required_zones = ["walkway"]    # object must have entered one of these zones
+# cooldown_seconds = 120          # overrides detection.cooldown_seconds

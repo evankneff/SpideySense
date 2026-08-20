@@ -1,0 +1,13 @@
+# Build output
+/src-tauri/target/
+/src-tauri/gen/
+
+# A real config holds the MQTT password; only the example is tracked.
+/config.toml
+config.toml
+
+# Portable-mode runtime output, if the exe is ever run from the repo
+/logs/
+*.log
+
+node_modules/
