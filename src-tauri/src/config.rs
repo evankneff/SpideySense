@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 pub const EXAMPLE_CONFIG: &str = include_str!("../../config.example.toml");
 
@@ -51,7 +52,7 @@ pub struct Config {
 }
 
 /// Global hotkey for the keyboard camera picker.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Hotkey {
     pub enabled: bool,
@@ -71,7 +72,7 @@ impl Default for Hotkey {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mqtt {
     pub host: String,
@@ -233,6 +234,57 @@ impl Default for Detection {
 
 // ---------------------------------------------------------------------------
 // Loading
+/// A config that the tray's "Reload config" item can replace while the app is running.
+///
+/// Readers take a snapshot (`load`) rather than holding the lock, so a reload can never
+/// block an event being dispatched or a popup being placed. A swap is therefore atomic
+/// from a reader's point of view: it sees either the whole old config or the whole new
+/// one, never a mix of the two.
+#[derive(Clone)]
+pub struct ConfigSlot(Arc<RwLock<Arc<Config>>>);
+
+impl ConfigSlot {
+    pub fn new(config: Arc<Config>) -> Self {
+        Self(Arc::new(RwLock::new(config)))
+    }
+
+    /// The current config. Cheap - one `Arc` clone, no deep copy.
+    pub fn load(&self) -> Arc<Config> {
+        match self.0.read() {
+            Ok(guard) => guard.clone(),
+            // A panic elsewhere must not take the app down: the value behind the lock is
+            // still a fully valid config, because it is only ever replaced wholesale.
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    pub fn store(&self, next: Config) {
+        let next = Arc::new(next);
+        match self.0.write() {
+            Ok(mut guard) => *guard = next,
+            Err(poisoned) => *poisoned.into_inner() = next,
+        }
+    }
+}
+
+/// Settings a reload reads but cannot apply, because something outside the config is
+/// already bound to them: the MQTT client is connected and subscribed, and the hotkey is
+/// registered with the OS.
+///
+/// Returned so the caller can say which ones changed. Claiming a reload applied a new
+/// broker address while the client is still talking to the old one would be exactly the
+/// kind of lie the popup badge rules exist to prevent.
+pub fn deferred_changes(current: &Config, next: &Config) -> Vec<&'static str> {
+    let mut deferred = Vec::new();
+    if next.mqtt != current.mqtt {
+        deferred.push("MQTT broker settings");
+    }
+    if next.hotkey != current.hotkey {
+        deferred.push("the camera picker hotkey");
+    }
+    deferred
+}
+
 // ---------------------------------------------------------------------------
 
 impl Config {
@@ -598,5 +650,70 @@ stream = ""
         let c = parse_named("example", EXAMPLE_CONFIG)?;
         assert!(!c.cameras.is_empty());
         Ok(())
+    }
+
+    // --- runtime config reload -------------------------------------------------
+
+    #[test]
+    fn a_reload_is_atomic_for_a_reader_that_already_took_a_snapshot() {
+        // The bug this guards: a reader mid-decision must not see half the old config
+        // and half the new one. Holding an Arc pins the whole value, not a view of it.
+        let slot = ConfigSlot::new(std::sync::Arc::new(crate::testutil::config_from(
+            crate::testutil::BASE_CONFIG,
+        )));
+        let before = slot.load();
+        let cameras_before = before.cameras.len();
+
+        let mut next = crate::testutil::config_from(crate::testutil::BASE_CONFIG);
+        next.cameras.clear();
+        slot.store(next);
+
+        assert_eq!(
+            before.cameras.len(),
+            cameras_before,
+            "a snapshot taken before the swap must not change underneath its holder"
+        );
+        assert!(
+            slot.load().cameras.is_empty(),
+            "a snapshot taken after the swap must see the new config"
+        );
+    }
+
+    #[test]
+    fn changing_only_hot_settings_defers_nothing() {
+        let current = crate::testutil::config_from(crate::testutil::BASE_CONFIG);
+        let mut next = crate::testutil::config_from(crate::testutil::BASE_CONFIG);
+        next.cameras.clear();
+
+        assert!(
+            deferred_changes(&current, &next).is_empty(),
+            "camera edits apply live and must not ask for a restart"
+        );
+    }
+
+    #[test]
+    fn changing_the_broker_is_reported_as_needing_a_restart() {
+        // The MQTT client is already connected and subscribed, so swapping the value
+        // would leave the app disagreeing with the file it just read.
+        let current = crate::testutil::config_from(crate::testutil::BASE_CONFIG);
+        let mut next = crate::testutil::config_from(crate::testutil::BASE_CONFIG);
+        next.mqtt.host = "192.168.1.99".into();
+
+        assert_eq!(
+            deferred_changes(&current, &next),
+            vec!["MQTT broker settings"]
+        );
+    }
+
+    #[test]
+    fn changing_the_hotkey_is_reported_as_needing_a_restart() {
+        let current = crate::testutil::config_from(crate::testutil::BASE_CONFIG);
+        let mut next = crate::testutil::config_from(crate::testutil::BASE_CONFIG);
+        next.hotkey.binding = "CmdOrCtrl+Shift+K".into();
+
+        assert_eq!(
+            deferred_changes(&current, &next),
+            vec!["the camera picker hotkey"]
+        );
     }
 }

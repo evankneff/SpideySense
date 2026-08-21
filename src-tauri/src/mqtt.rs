@@ -3,7 +3,7 @@
 //! The task never returns. Connection failures are logged and retried with exponential
 //! backoff; malformed payloads are logged and dropped. Neither can take the app down.
 
-use crate::config::Config;
+use crate::config::ConfigSlot;
 use crate::events::{Decision, EventType, FrigateEvent, SkipReason, Triggers};
 use crate::lifecycle::{Popups, Signal};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, Publish, QoS};
@@ -16,7 +16,7 @@ use tracing::{debug, error, info, trace, warn};
 /// Everything the MQTT task needs. Bundled so `run` and `dispatch` keep short signatures.
 pub struct Context<R: Runtime> {
     pub app: AppHandle<R>,
-    pub config: Arc<Config>,
+    pub config: ConfigSlot,
     pub triggers: Arc<Mutex<Triggers>>,
     pub popups: Arc<Mutex<Popups>>,
 }
@@ -52,7 +52,7 @@ struct EventTiming {
 }
 
 pub async fn run<R: Runtime>(ctx: Context<R>) {
-    let config = ctx.config.clone();
+    let config = ctx.config.load();
     let topic = format!("{}/events", config.mqtt.topic_prefix);
 
     let mut options = MqttOptions::new(&config.mqtt.client_id, &config.mqtt.host, config.mqtt.port);
@@ -199,7 +199,10 @@ fn record_cadence(event: &FrigateEvent, cadence: &mut HashMap<String, EventTimin
 /// event skipped for cooldown, for instance, must still keep its window alive.
 pub fn dispatch<R: Runtime>(ctx: &Context<R>, event: &FrigateEvent) {
     let now = Instant::now();
-    let config = &ctx.config;
+    // One snapshot for the whole decision: a reload landing mid-dispatch must not
+    // change the rules between evaluating the event and opening its window.
+    let config = ctx.config.load();
+    let config = config.as_ref();
     let camera = &event.after.camera;
 
     let decision = {

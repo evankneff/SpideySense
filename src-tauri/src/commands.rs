@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 /// Opens this camera in the Frigate web UI, in the default browser.
 #[tauri::command]
 pub fn popup_open_ui<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>, camera: String) {
-    let url = state.config.camera_ui_url(&camera);
+    let url = state.config.load().camera_ui_url(&camera);
     info!(%camera, %url, "opening the Frigate UI");
     if let Err(e) = app.opener().open_url(&url, None::<&str>) {
         warn!(%camera, "could not open {url}: {e:#}");
@@ -48,8 +48,10 @@ pub fn popup_hover(state: State<'_, AppState>, camera: String, hovered: bool) {
 /// Closes up the stack after a manual dismissal.
 fn restack<R: Runtime>(app: &AppHandle<R>, state: &State<'_, AppState>) {
     let slots = state.popups().slots();
+    // One snapshot for the whole restack, so every window is placed by the same rules.
+    let config = state.config.load();
     for (camera, slot) in slots {
-        if let Err(e) = windows::move_to_slot(app, &state.config, &camera, slot) {
+        if let Err(e) = windows::move_to_slot(app, &config, &camera, slot) {
             warn!(camera, slot, "could not restack after dismissal: {e:#}");
         }
     }
@@ -62,7 +64,8 @@ pub fn picker_choose<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>, 
     // leave the picker covering the thing the user just asked to see.
     picker::close(&app);
 
-    let Some(config_camera) = state.config.camera(&camera).cloned() else {
+    let config = state.config.load();
+    let Some(config_camera) = config.camera(&camera).cloned() else {
         error!(%camera, "picker chose a camera that is not in the config");
         return;
     };
@@ -70,12 +73,7 @@ pub fn picker_choose<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>, 
     info!(%camera, "opening a pinned popup from the picker");
     // Off this thread: creating a window inside a synchronous command deadlocks on
     // Windows, which froze the whole app.
-    lifecycle::spawn_open_pinned(
-        app.clone(),
-        state.config.clone(),
-        state.popups.clone(),
-        config_camera,
-    );
+    lifecycle::spawn_open_pinned(app.clone(), config, state.popups.clone(), config_camera);
 }
 
 /// Dismisses the picker without choosing anything.

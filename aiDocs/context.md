@@ -55,14 +55,17 @@ Added beyond the original scope: a tray camera picker and a global-hotkey keyboa
 picker (both open pinned live views), `--preview` and `--simulate` flags, and two example
 binaries (`discover_cameras`, `publish_test_event`).
 
-64 unit tests, clippy clean with `-D warnings`, verified in CI on Windows.
+68 unit tests, clippy clean with `-D warnings`, verified in CI on Windows.
 
-**Two behaviours are implemented and unit-tested but have never been observed firing
-against real hardware.** Do not claim they work:
+**One behaviour is implemented and unit-tested but has never been observed firing
+against real hardware.** Do not claim it works:
 
 - The `stationary` close path. No tracked object has gone motionless in frame yet.
-- A live MQTT reconnect mid-session. Backoff was verified against a dead broker
-  (1s, 2s, 4s, 8s, 16s); an actual drop-and-resubscribe has not been seen.
+
+Retired 2026-08-21: a live mid-session MQTT reconnect **has** now been observed twice,
+correlated against Windows Kernel-Power events. Both drops were sleep/resume, not broker
+failures. Reconnect and resubscribe followed 1.08s after a 1s backoff and 2.02s after a
+2s one.
 
 ## Behavior
 

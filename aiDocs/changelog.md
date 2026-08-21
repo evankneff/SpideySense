@@ -2,6 +2,32 @@ This is meant to be a CONCISE list of changes to track as we develop this projec
 
 ---
 
+## 2026-08-21 - Reload config from the tray
+
+- New tray item re-reads and validates `config.toml`, swaps it in, and rebuilds the menu.
+- `AppState.config` was an `Arc<Config>` cloned into five long-lived places, so nothing
+  could replace it. Now a `ConfigSlot` (`Arc<RwLock<Arc<Config>>>`) that readers snapshot
+  from, so a reload never blocks a dispatch and each reader sees a whole config, never a
+  mix. `dispatch` takes one snapshot per event for the same reason.
+- MQTT and hotkey settings are read but not applied - both are already bound to something
+  live. `config::deferred_changes` names what changed and the reload asks for a restart
+  instead of pretending. Pure function, so it is unit tested.
+- Menu rebuild reads the live pause state; hardcoding it would have silently un-ticked
+  do-not-disturb on every reload.
+- Verified end to end: clicked in the tray against the running app under live detection
+  traffic, logged `config reloaded from disk cameras=5 deferred=0`, no menu-rebuild
+  warnings, process still responding. The restart-required dialog is unit tested but has
+  not been seen on screen.
+- 68 unit tests, up from 64.
+
+## 2026-08-21 - MQTT reconnect caveat retired
+
+- A live mid-session reconnect has now been observed twice against real hardware, both
+  sleep/resume rather than broker failure, correlated against Windows Kernel-Power events
+  (Id 42 sleep, 130/131 resume). Reconnect and resubscribe 1.08s after a 1s backoff and
+  2.02s after a 2s one.
+- An apparent two-hour outage in the log was the machine asleep, not a stalled client.
+
 ## 2026-08-21 - Prepared for public release
 
 - Audited all 6 commits of history before going public: no `config.toml`, no credentials,

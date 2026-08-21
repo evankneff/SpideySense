@@ -68,6 +68,8 @@ that exception cannot leak back into detection popups.
 - **Lifecycle management.** Cooldowns, minimum display time, auto-close on event end, and
   stacking with eviction when several cameras fire at once.
 - **Do-not-disturb**, toggled from the tray, with a distinct paused tray icon.
+- **Reload config from the tray** without restarting, for everything that is not already
+  bound to a live connection.
 - **Global-hotkey camera picker** - keyboard-navigable, opens any camera on demand.
 - **Click-through to Frigate** for the full event and recording.
 - **No audio at all.** No audio transceiver is negotiated - quiet by construction, not by
@@ -91,7 +93,7 @@ Decision filters, applied in order:
 Written in Rust ([Tauri 2](https://tauri.app)), no frontend build step - the popup page is
 vanilla HTML in `src/`.
 
-- **64 unit tests**, `cargo clippy -- -D warnings` clean, verified in CI on Windows.
+- **68 unit tests**, `cargo clippy -- -D warnings` clean, verified in CI on Windows.
 - **Pure logic is separated from I/O**, so trigger decisions and popup lifecycle are unit
   tested without a broker or a window.
 - **Window work is planned under the lock and applied outside it**, so a slow window call
@@ -109,9 +111,14 @@ an overlay script that never ran, popups drawn on top of each other after evicti
 mislabelled event lifetime, and a shared temp directory that made tests delete each other's
 fixtures. Each fix added a regression test for the *mechanism*, not just the output string.
 
-Two behaviours are implemented and unit tested but have **never been observed firing against
-real hardware**, and are documented as such rather than claimed as working: the `stationary`
-close path, and a live mid-session MQTT reconnect.
+One behaviour is implemented and unit tested but has **never been observed firing against
+real hardware**, and is documented as such rather than claimed as working: the `stationary`
+close path.
+
+Mid-session MQTT reconnect *has* now been observed in the wild. Every drop so far has been
+a sleep/resume transition rather than a broker failure: the connection dies as the machine
+suspends, and the first poll after resume returns a timeout, reconnects and resubscribes.
+Measured gaps matched the configured backoff to within 80 ms.
 
 ## How this project was built
 
@@ -323,6 +330,7 @@ stylesheet, if the bundled page ever misbehaves.
 | **Show camera ▸** | every configured camera; opens a pinned live view |
 | **Pause notifications** | do-not-disturb. The tray icon desaturates and the tooltip changes, because an invisible paused state is one you forget you are in. Not persisted across restarts — deliberately, so you cannot leave yourself silently muted. |
 | **Launch at login** | via `tauri-plugin-autostart`. The tick is read from the real registry state on every menu build, so it stays correct if changed outside the app. |
+| **Reload config** | re-reads and validates `config.toml`, swaps it in, and rebuilds the menu from it. Cameras, labels, zones, cooldowns and popup geometry apply immediately. Broker and hotkey settings are read but *not* applied - they are already bound to a live connection and an OS registration - so the reload names them and asks for a restart rather than pretending. A config that fails validation leaves the running one untouched. |
 | **Open config file / Open log file** | opens the current file in the default handler |
 | **Quit** | the only thing that exits the process |
 
@@ -473,6 +481,8 @@ authenticated 8971 endpoint, so the two options above are the practical ones.
 ## Resilience
 
 - MQTT reconnects with exponential backoff, 1s doubling to a 60s ceiling, reset on connect.
+  Observed against real hardware on sleep/resume: reconnect and resubscribe 1.08s after a
+  1s backoff and 2.02s after a 2s one.
 - Subscription is re-issued on every `ConnAck`, not once at startup — the session is clean,
   so a reconnect would otherwise come back subscribed to nothing. This is also what makes
   sleep/resume work.

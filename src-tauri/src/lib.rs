@@ -18,7 +18,7 @@ mod ui;
 mod windows;
 
 use anyhow::{anyhow, Context, Result};
-use config::{Camera, Config};
+use config::{Camera, Config, ConfigSlot};
 use events::Triggers;
 use lifecycle::Popups;
 use std::sync::{Arc, Mutex};
@@ -33,7 +33,8 @@ const SWEEP_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Shared application state.
 pub struct AppState {
-    pub config: Arc<Config>,
+    /// Swappable, so the tray's "Reload config" item can replace it at runtime.
+    pub config: ConfigSlot,
     /// Cooldown bookkeeping and the do-not-disturb flag. Shared with the MQTT task.
     pub triggers: Arc<Mutex<Triggers>>,
     /// Which popups are open and when each one is due to close.
@@ -170,29 +171,29 @@ fn preview_targets<'a>(config: &'a Config, requested: &[String]) -> Result<Vec<&
 ///
 /// Registration fails if another application already owns the combination, which is why
 /// it is reported rather than propagated - the app is still useful without it.
-fn register_hotkey<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    config: Arc<Config>,
-) -> Result<()> {
+fn register_hotkey<R: tauri::Runtime>(app: &tauri::AppHandle<R>, config: ConfigSlot) -> Result<()> {
     use std::str::FromStr;
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-    if !config.hotkey.enabled {
+    let snapshot = config.load();
+    if !snapshot.hotkey.enabled {
         info!("camera picker hotkey disabled in config");
         return Ok(());
     }
 
-    let binding = config.hotkey.binding.trim().to_string();
+    let binding = snapshot.hotkey.binding.trim().to_string();
     let shortcut = Shortcut::from_str(&binding)
         .with_context(|| format!("`{binding}` is not a valid shortcut"))?;
 
+    // The slot, not a snapshot: a reloaded camera list shows up in the picker without
+    // a restart, even though rebinding the key itself still needs one.
     let for_handler = config.clone();
     app.plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, _shortcut, event| {
                 // Pressed only. Acting on Released too would toggle twice per keypress.
                 if event.state() == ShortcutState::Pressed {
-                    picker::toggle(app, &for_handler);
+                    picker::toggle(app, &for_handler.load());
                 }
             })
             .build(),
@@ -214,7 +215,7 @@ fn register_hotkey<R: tauri::Runtime>(
 /// naturally finds everything already past its deadline and cleans up in one pass.
 fn spawn_sweeper<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    config: Arc<Config>,
+    config: ConfigSlot,
     popups: Arc<Mutex<Popups>>,
 ) {
     tauri::async_runtime::spawn(async move {
@@ -236,7 +237,7 @@ fn spawn_sweeper<R: tauri::Runtime>(
             };
 
             if !plan.is_empty() {
-                lifecycle::apply(&app, &config, &plan);
+                lifecycle::apply(&app, &config.load(), &plan);
             }
         }
     });
@@ -261,22 +262,25 @@ fn start(config: Arc<Config>, mode: cli::Mode) -> Result<()> {
         .setup(move |app| {
             let triggers = Arc::new(Mutex::new(Triggers::new()));
             let popups = Arc::new(Mutex::new(Popups::new()));
+            // Everything long-lived reads through the slot, so the tray's reload is
+            // visible to the MQTT task and the sweeper without restarting either.
+            let slot = ConfigSlot::new(config.clone());
             app.manage(AppState {
-                config: config.clone(),
+                config: slot.clone(),
                 triggers: triggers.clone(),
                 popups: popups.clone(),
             });
             tray::create(app.handle())?;
             info!("tray icon ready");
 
-            if let Err(e) = register_hotkey(app.handle(), config.clone()) {
+            if let Err(e) = register_hotkey(app.handle(), slot.clone()) {
                 // A hotkey conflict must not stop the app; detections still work.
                 error!("camera picker hotkey unavailable: {e:#}");
             }
 
             let context = || mqtt::Context {
                 app: app.handle().clone(),
-                config: config.clone(),
+                config: slot.clone(),
                 triggers: triggers.clone(),
                 popups: popups.clone(),
             };
@@ -296,11 +300,11 @@ fn start(config: Arc<Config>, mode: cli::Mode) -> Result<()> {
                     info!(%camera, %label, "injecting a simulated detection");
                     let ctx = context();
                     mqtt::dispatch(&ctx, &mqtt::simulated_event(camera, label));
-                    spawn_sweeper(app.handle().clone(), config.clone(), popups.clone());
+                    spawn_sweeper(app.handle().clone(), slot.clone(), popups.clone());
                     tauri::async_runtime::spawn(mqtt::run(ctx));
                 }
                 cli::Mode::Normal => {
-                    spawn_sweeper(app.handle().clone(), config.clone(), popups.clone());
+                    spawn_sweeper(app.handle().clone(), slot.clone(), popups.clone());
                     tauri::async_runtime::spawn(mqtt::run(context()));
                 }
                 cli::Mode::Help => {}
