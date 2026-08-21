@@ -1,18 +1,114 @@
-# frigate-popup
+# SpideySense
 
-Borderless, always-on-top camera popups on your Windows desktop, driven by Frigate NVR
-detection events. Lives in the tray, never steals keyboard focus, closes itself.
+**Someone walks past your camera. A small live view appears in the corner of your screen,
+then quietly disappears.** That is the whole product.
 
-## Status
+SpideySense is a Windows tray app that watches a [Frigate](https://frigate.video) NVR over
+MQTT and pops a borderless, always-on-top window showing the camera that just detected
+something - then closes itself. It is not an NVR client, a viewer, or a dashboard. It shows
+you a camera for a few seconds and gets out of the way.
 
-| # | Milestone | State |
-|---|-----------|-------|
-| 1 | Scaffold: tray, config load + validation, rotating logs | **done** |
-| 2 | MQTT client, `frigate/events` subscription, trigger decisions | **done** |
-| 3 | Popup window on trigger, loading go2rtc `stream.html` | **done** |
-| 4 | Lifecycle: cooldowns, auto-close, end-event, min display, stacking | **done** (hover-pause wired, not yet driven) |
-| 5 | Snapshot-first custom page, swap to WebRTC | **done** |
-| 6 | Polish: DND, autostart, click-through, hover-pause, paused icon | **done** |
+[![CI](https://github.com/evankneff/SpideySense/actions/workflows/ci.yml/badge.svg)](https://github.com/evankneff/SpideySense/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Rust](https://img.shields.io/badge/rust-1.82+-orange.svg)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue.svg)
+
+<p align="center">
+  <img src="assets/demo.gif" alt="A camera popup appearing in the corner of the desktop and closing itself" width="820">
+</p>
+
+<p align="center">
+  <em>Summoning a camera from the global-hotkey picker. Detections open the same window on their own.</em>
+</p>
+
+> The crate and binary are named `frigate-popup`; SpideySense is the project name.
+
+## The hard part: never stealing focus
+
+The entire product rests on one requirement - **a popup must never take keyboard focus.**
+You are mid-sentence in another window when a delivery driver walks up the driveway. A
+window that steals focus does not just annoy you, it eats your keystrokes.
+
+Tauri's `.focused(false)` is **not sufficient** on Windows. A window can still be activated
+as it is shown. The real fix applies the Win32 `WS_EX_NOACTIVATE` extended style to the HWND
+*before* the window is ever displayed:
+
+```rust
+// src-tauri/src/windows.rs - the popup can be shown, but never activated.
+let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+SetWindowLongPtrW(hwnd, GWL_EXSTYLE, current | WS_EX_NOACTIVATE.0 as isize);
+```
+
+The one deliberate exception is the keyboard camera picker, which the user explicitly
+summons and which cannot read arrow keys without focus. It is a **separate window type** so
+that exception cannot leak back into detection popups.
+
+## Features
+
+- **Snapshot-first rendering.** Shows a still frame immediately, then swaps to live WebRTC
+  once the stream negotiates - because a cold go2rtc stream can take seconds to produce a
+  keyframe (see [Field notes](#field-notes)).
+- **Lifecycle management.** Cooldowns, minimum display time, auto-close on event end, and
+  stacking with eviction when several cameras fire at once.
+- **Do-not-disturb**, toggled from the tray, with a distinct paused tray icon.
+- **Global-hotkey camera picker** - keyboard-navigable, opens any camera on demand.
+- **Click-through to Frigate** for the full event and recording.
+- **No audio at all.** No audio transceiver is negotiated - quiet by construction, not by
+  muting.
+- **Never lies.** The detection badge is suppressed at the Rust boundary for windows you
+  opened by hand. A badge that can be wrong is worse than no badge.
+
+## Design principles
+
+Decision filters, applied in order:
+
+1. **Could this steal focus or interrupt typing?** If yes, redesign it.
+2. **Is this glanceable in under two seconds?** If it needs reading, it does not belong in
+   a popup.
+3. **Does this claim something happened that did not?** Suppress rather than guess.
+4. **Is this Frigate's job?** If yes, link out instead of rebuilding it.
+5. **Does this add a knob nobody will turn?** Prefer a good default.
+
+## Engineering notes
+
+Written in Rust ([Tauri 2](https://tauri.app)), no frontend build step - the popup page is
+vanilla HTML in `src/`.
+
+- **64 unit tests**, `cargo clippy -- -D warnings` clean, verified in CI on Windows.
+- **Pure logic is separated from I/O**, so trigger decisions and popup lifecycle are unit
+  tested without a broker or a window.
+- **Window work is planned under the lock and applied outside it**, so a slow window call
+  can never block the MQTT task holding popup state.
+- **No `unwrap()` or `expect()` on runtime paths.** Config parsing may fail loudly at
+  startup; everything after that degrades rather than panics.
+- **A malformed MQTT payload can never kill the client.** It is logged truncated and
+  dropped.
+
+### Bugs unit tests did not catch
+
+This project is a standing reminder that passing tests are not evidence a feature works.
+Four bugs shipped straight through a green suite and were only found against real hardware:
+an overlay script that never ran, popups drawn on top of each other after eviction, a
+mislabelled event lifetime, and a shared temp directory that made tests delete each other's
+fixtures. Each fix added a regression test for the *mechanism*, not just the output string.
+
+Two behaviours are implemented and unit tested but have **never been observed firing against
+real hardware**, and are documented as such rather than claimed as working: the `stationary`
+close path, and a live mid-session MQTT reconnect.
+
+## How this project was built
+
+This repository keeps its AI-assisted development scaffolding in the open, because the
+process is part of the work:
+
+| Path | Contents |
+|---|---|
+| `CLAUDE.md` | Standing rules for the AI assistant working in this repo |
+| `aiDocs/` | Living context: architecture, PRD, coding style, changelog |
+| `ai/roadmaps/` | Phase plans and roadmaps, moved to `complete/` when shipped |
+
+The rule that mattered most is in `CLAUDE.md`: *"Verify before claiming. A passing unit test
+is not evidence that a feature works end to end."* The four bugs above are why.
 
 ## Layout
 
@@ -69,67 +165,86 @@ cargo clippy --all-targets -- -D warnings
 
 Log verbosity is controlled by `RUST_LOG`, e.g. `RUST_LOG=frigate_popup_lib=trace`.
 
-## Verified against this network (2026-08-20)
+### The binary that runs at boot (2026-08-21)
 
-| Check | Result |
+Launch-at-login runs a **copy** of the release exe, deliberately kept outside `target/`
+so `cargo clean` cannot break startup:
+
+```
+%LOCALAPPDATA%\frigate-popup\frigate-popup.exe
+```
+
+**After any code change, rebuild and re-copy, or boot keeps running the old build:**
+
+```powershell
+cd src-tauri
+cargo build --release
+Copy-Item target\release\frigate-popup.exe "$env:LOCALAPPDATA\frigate-popup\frigate-popup.exe" -Force
+```
+
+Registry: `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run`, value `frigate-popup`.
+`tauri-plugin-autostart` writes the path with a trailing space and no quotes, plus a
+`StartupApproved\Run` binary entry - the tray tick reads both, so edit it via the tray,
+not by hand.
+
+Do not drop a `config.toml` next to that exe - it would flip the app into portable mode
+(see `paths.rs`) and silently orphan the real config in `%APPDATA%\frigate-popup\`.
+
+## Field notes
+
+Findings from running this against a live Frigate + go2rtc deployment. Addresses below are
+placeholders; substitute your own.
+
+### Frigate camera names are not go2rtc stream names
+
+This is the single most important integration detail, and the reason every `[[cameras]]`
+block carries a `name` / `stream` pair rather than one identifier:
+
+| Frigate (`after.camera`) | go2rtc stream |
 |---|---|
-| go2rtc API `10.0.0.193:1984` | open, 12 ms |
-| go2rtc WebRTC `10.0.0.193:8555` TCP | **blocked** |
-| go2rtc WebRTC UDP | works — `stream.html?mode=webrtc` plays live video |
-| Frigate UI `10.0.0.193:8971` | open |
-| Frigate internal `10.0.0.193:5000` | blocked (expected) |
-| MQTT `10.0.0.213:1883` | open |
-| `/api/frame.jpeg?src=<cam>_sub` | 200 on all five cameras |
+| `front_door` | `front_door_sub` |
+| `garage_camera` | `garage_sub` |
 
-go2rtc streams present: `doorbell`, `sidedoor`, `garage`, `indoor_garage`,
-`indoor_living_room`, each with `_main` and `_sub` variants. Popups use `_sub`.
+Frigate publishes its own camera name in the MQTT event; go2rtc knows nothing about it. The
+config bridges the two. Most streams expose `_main` and `_sub` variants - popups use `_sub`,
+since a 480x270 window has no use for a 4K main stream.
 
-**The Frigate camera names are different from the go2rtc stream names**, which is what the
-`name` / `stream` pair in each `[[cameras]]` block exists to bridge:
+Run `cargo run --example discover_cameras` to derive the Frigate names from retained MQTT
+topics. This needs no Frigate API auth, which matters because the HTTP API sits behind an
+authenticated port.
 
-| Frigate (`after.camera`) | go2rtc stream | zones seen |
-|---|---|---|
-| `front_doorbell` | `doorbell_sub` | front_porch, front_yard |
-| `garage_camera` | `garage_sub` | driveway, garage_front_yard |
-| `side_camera` | `sidedoor_sub` | back_yard, back_porch, back_door |
-| `indoor_garage` | `indoor_garage_sub` | — |
-| `indoor_living_room` | `indoor_living_room_sub` | — |
+### WebRTC transport
 
-Run `cargo run --example discover_cameras` to re-derive the Frigate names from retained
-MQTT topics — no Frigate API auth needed, which matters because the HTTP API is behind the
-authenticated 8971 port.
+WebRTC over TCP (port 8555) was blocked on the test network; UDP negotiated fine and played
+live video. The player therefore does not assume TCP is available.
 
-Cold-start latency on `frame.jpeg` was 0.7–3.9 s for idle streams and 0.04 s for an already
-active one, because go2rtc has to spin up the producer and wait for a keyframe. Milestone 5
-should fire the snapshot request and the stream connection in parallel rather than assuming
-the snapshot is the fast path.
+### Snapshot cold-start latency
 
-### Security note: go2rtc leaks camera credentials
+`/api/frame.jpeg` returned in **0.7-3.9 s** for an idle stream but **0.04 s** for an already
+active one - go2rtc has to spin up the producer and wait for a keyframe. This is why the
+popup fires the snapshot request and the stream connection *in parallel* rather than
+treating the snapshot as reliably the fast path.
 
-`http://10.0.0.193:1984/api/streams` is unauthenticated and returns each stream's *resolved*
-ffmpeg command line — including the Reolink camera passwords in plaintext. Anything on the
-LAN can read them. Frigate has a published advisory for this class of exposure
-(GHSA-mgh5-cr9h-g6hr).
+### Security note: go2rtc exposes camera credentials
+
+`/api/streams` on the go2rtc port is unauthenticated and returns each stream's *resolved*
+ffmpeg command line - including camera passwords in plaintext. Anything on the LAN can read
+them. Frigate has a published advisory for this class of exposure
+([GHSA-mgh5-cr9h-g6hr](https://github.com/blakeblackshear/frigate/security/advisories/GHSA-mgh5-cr9h-g6hr)).
 
 Because the API reports the *resolved* command, moving credentials into environment
-variables protects the config file but **does not** close this hole.
+variables protects the config file but **does not** close this hole. Treat the go2rtc port as
+trusted-LAN-only.
 
-The fix that keeps frigate-popup working is `api.allow_paths`, a whitelist added in go2rtc
-v1.9.12 (this host runs 1.9.14). Paths this app actually needs, captured from a real player
-session:
+This app never calls `/api/streams`. It needs exactly two go2rtc paths:
 
 | Path | Used for |
 |---|---|
-| `/stream.html` | the player page (milestone 3 only) |
-| `/video-rtc.js`, `/video-stream.js` | player scripts (milestone 3 only) |
-| `/api/ws` | WebSocket signalling for both WebRTC and MSE |
-| `/api/frame.jpeg` | snapshot-first frame (milestone 5) |
+| `/api/ws` | WebSocket signalling for WebRTC and MSE |
+| `/api/frame.jpeg` | the snapshot-first first frame |
 
-`/api/streams` is **not** needed. Once milestone 5 replaces `stream.html` with a local page,
-the whitelist shrinks to just `/api/ws` and `/api/frame.jpeg`.
-
-Also worth knowing: go2rtc's own `stream.html` fetches `https://go2rtc.org/manifest.json`
-from the public internet on every load. The milestone 5 local page removes that too.
+Serving its own player page also avoids go2rtc's bundled `stream.html`, which fetches
+`https://go2rtc.org/manifest.json` from the public internet on every load.
 
 ## Preview mode
 
@@ -312,7 +427,7 @@ It runs through the real trigger logic and then carries on connecting to MQTT no
 Over the wire, to exercise the actual MQTT path:
 
 ```bash
-mosquitto_pub -h 10.0.0.213 -u frigate_mqtt -P '<pw>' -t frigate/events -m '{
+mosquitto_pub -h 192.168.1.11 -u frigate_mqtt -P '<pw>' -t frigate/events -m '{
   "type": "new",
   "before": null,
   "after": {

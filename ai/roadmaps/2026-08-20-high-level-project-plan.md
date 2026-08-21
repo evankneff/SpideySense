@@ -73,8 +73,6 @@ Nothing here gets built without evidence from real use.
 
 **Security follow-ups (outside this codebase):**
 
-- [ ] Rotate the Reolink camera passwords — they were readable from the unauthenticated
-      go2rtc `/api/streams` endpoint
 - [ ] Apply go2rtc `api.allow_paths`, now only `/api/ws` and `/api/frame.jpeg`, and
       re-test Frigate's own live view afterwards
 

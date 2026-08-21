@@ -415,7 +415,7 @@ mod tests {
         for expected in [
             r#""camera":"front_doorbell""#,
             r#""stream":"doorbell_sub""#,
-            r#""go2rtc":"http://10.0.0.193:1984""#,
+            r#""go2rtc":"http://192.168.1.10:1984""#,
             r#""fit":"contain""#,
             r#""label":"person""#,
             r#""kind":"detection""#,

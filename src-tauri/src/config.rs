@@ -96,9 +96,9 @@ pub struct Mqtt {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Frigate {
-    /// Base URL of the Frigate web UI, used for click-through. e.g. https://10.0.0.193:8971
+    /// Base URL of the Frigate web UI, used for click-through. e.g. https://192.168.1.10:8971
     pub ui_url: String,
-    /// Base URL of the go2rtc API. e.g. http://10.0.0.193:1984
+    /// Base URL of the go2rtc API. e.g. http://192.168.1.10:1984
     pub go2rtc_url: String,
 }
 
@@ -471,11 +471,11 @@ mod tests {
     fn minimal() -> &'static str {
         r#"
 [mqtt]
-host = "10.0.0.213"
+host = "192.168.1.11"
 
 [frigate]
-ui_url = "https://10.0.0.193:8971/"
-go2rtc_url = "http://10.0.0.193:1984"
+ui_url = "https://192.168.1.10:8971/"
+go2rtc_url = "http://192.168.1.10:1984"
 
 [[cameras]]
 name = "doorbell"
@@ -511,10 +511,10 @@ stream = "doorbell_sub"
     #[test]
     fn trailing_slashes_are_stripped_from_urls() -> Result<()> {
         let c = parse_named("urls", minimal())?;
-        assert_eq!(c.frigate.ui_url, "https://10.0.0.193:8971");
+        assert_eq!(c.frigate.ui_url, "https://192.168.1.10:8971");
         assert_eq!(
             c.camera_ui_url("doorbell"),
-            "https://10.0.0.193:8971/cameras/doorbell"
+            "https://192.168.1.10:8971/cameras/doorbell"
         );
         Ok(())
     }
@@ -537,7 +537,7 @@ host = ""
 port = 0
 
 [frigate]
-ui_url = "10.0.0.193:8971"
+ui_url = "192.168.1.10:8971"
 go2rtc_url = "ftp://nope"
 
 [popup]

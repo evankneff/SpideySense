@@ -247,7 +247,7 @@ mod tests {
         assert!(script.contains(r#""enabled":true"#));
         // Disabled cameras are listed too - asking for a feed by hand is a different
         // intent from wanting alerts from it.
-        assert!(script.contains(r#""name":"indoor_garage""#));
+        assert!(script.contains(r#""name":"shed""#));
         assert!(script.contains(r#""enabled":false"#));
     }
 }

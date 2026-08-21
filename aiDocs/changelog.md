@@ -2,6 +2,32 @@ This is meant to be a CONCISE list of changes to track as we develop this projec
 
 ---
 
+## 2026-08-21 - Prepared for public release
+
+- Audited all 6 commits of history before going public: no `config.toml`, no credentials,
+  no real email (commits use a GitHub noreply address). No history rewrite was needed.
+- Sanitised identifying detail: LAN addresses to `192.168.1.x` placeholders, indoor camera
+  names replaced, and the README section documenting the owner's real network topology,
+  camera-to-zone map and port scan replaced with generic field notes.
+- Dropped a roadmap TODO naming the camera vendor and an unresolved credential exposure.
+- Added MIT `LICENSE`, package metadata, and GitHub Actions CI on `windows-latest`
+  (fmt, clippy `-D warnings`, tests, release build). Verified green locally first.
+- README rewritten for a portfolio audience, led by a demo GIF and the `WS_EX_NOACTIVATE`
+  focus-suppression problem. AI scaffolding documented deliberately rather than hidden.
+- Untracked `.vscode/settings.json`.
+
+## 2026-08-21 - Autostart actually wired up
+
+- No code change. The tray toggle was never clicked, so nothing was ever in
+  `HKCU\...\CurrentVersion\Run` and the app did not come back after a reboot.
+- Only a debug build existed, so enabling the toggle would have registered a path under
+  `target/` that `cargo clean` silently breaks. Built release and copied it to
+  `%LOCALAPPDATA%\frigate-popup\` instead, then registered that path.
+- Verified by launching the registry command line: `portable=false`, config loaded,
+  MQTT connected to 192.168.1.11:1883, hotkey F20 registered.
+- README gained a "binary that runs at boot" section - rebuilds must re-copy the exe or
+  boot keeps running the old build.
+
 ## 2026-08-20 — Keyboard camera picker
 
 - Global hotkey (default F20) toggles a keyboard-navigable camera list.

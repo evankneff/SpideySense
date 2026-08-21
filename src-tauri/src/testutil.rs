@@ -26,18 +26,18 @@ pub fn config_from(text: &str) -> Config {
 /// A minimal valid config with the cameras the tests use.
 pub const BASE_CONFIG: &str = r#"
 [mqtt]
-host = "10.0.0.213"
+host = "192.168.1.11"
 
 [frigate]
-ui_url = "https://10.0.0.193:8971"
-go2rtc_url = "http://10.0.0.193:1984"
+ui_url = "https://192.168.1.10:8971"
+go2rtc_url = "http://192.168.1.10:1984"
 
 [[cameras]]
 name = "front_doorbell"
 stream = "doorbell_sub"
 
 [[cameras]]
-name = "indoor_garage"
-stream = "indoor_garage_sub"
+name = "shed"
+stream = "shed_sub"
 enabled = false
 "#;

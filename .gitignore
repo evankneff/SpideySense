@@ -11,3 +11,6 @@ config.toml
 *.log
 
 node_modules/
+
+# Personal editor config
+.vscode/

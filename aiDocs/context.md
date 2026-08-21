@@ -17,8 +17,9 @@ must never steal keyboard focus — the user is mid-work in another window.**
 
 Built for a single homelab user (the repo owner) running Frigate on a separate LAN
 machine. Not currently packaged or documented for third parties.
-<!-- TODO: Decide whether this is ever intended for public release. Affects PRD framing,
-     config portability assumptions, and how hardcoded the network layout can be. -->
+The repo is public as a portfolio project under MIT. Example configs and test
+fixtures therefore use placeholder addresses and generic camera names, never the
+owner's real network layout.
 
 ## Key Documents
 
@@ -54,7 +55,7 @@ Added beyond the original scope: a tray camera picker and a global-hotkey keyboa
 picker (both open pinned live views), `--preview` and `--simulate` flags, and two example
 binaries (`discover_cameras`, `publish_test_event`).
 
-63 unit tests, clippy clean with `-D warnings`.
+64 unit tests, clippy clean with `-D warnings`, verified in CI on Windows.
 
 **Two behaviours are implemented and unit-tested but have never been observed firing
 against real hardware.** Do not claim they work:

@@ -368,11 +368,11 @@ mod tests {
 
     #[test]
     fn disabled_cameras_are_skipped() {
-        let json = with_after(NEW_PERSON, "camera", "indoor_garage".into());
+        let json = with_after(NEW_PERSON, "camera", "shed".into());
         let decision = Triggers::new().evaluate(&config(), &parse(&json), Instant::now());
         assert_eq!(
             decision,
-            Decision::Skip(SkipReason::CameraDisabled("indoor_garage".into()))
+            Decision::Skip(SkipReason::CameraDisabled("shed".into()))
         );
     }
 
@@ -418,11 +418,11 @@ mod tests {
         triggers.record_fired("front_doorbell", t0);
 
         // A different camera is unaffected by the doorbell's cooldown.
-        let json = with_after(NEW_PERSON, "camera", "indoor_garage".into());
+        let json = with_after(NEW_PERSON, "camera", "shed".into());
         let decision = triggers.evaluate(&config, &parse(&json), t0 + Duration::from_secs(1));
         assert_eq!(
             decision,
-            Decision::Skip(SkipReason::CameraDisabled("indoor_garage".into())),
+            Decision::Skip(SkipReason::CameraDisabled("shed".into())),
             "should fail on being disabled, not on the doorbell's cooldown"
         );
     }
@@ -441,11 +441,11 @@ mod tests {
     fn required_zones_gate_the_trigger() {
         let text = r#"
 [mqtt]
-host = "10.0.0.213"
+host = "192.168.1.11"
 
 [frigate]
-ui_url = "https://10.0.0.193:8971"
-go2rtc_url = "http://10.0.0.193:1984"
+ui_url = "https://192.168.1.10:8971"
+go2rtc_url = "http://192.168.1.10:1984"
 
 [[cameras]]
 name = "front_doorbell"

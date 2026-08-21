@@ -5,6 +5,9 @@ description = "Borderless always-on-top camera popups driven by Frigate NVR even
 authors = ["Evan Neff"]
 edition = "2021"
 rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/evankneff/SpideySense"
+readme = "../README.md"
 
 [lib]
 name = "frigate_popup_lib"

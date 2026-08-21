@@ -13,7 +13,7 @@
 # MQTT - where Frigate publishes its events
 # ---------------------------------------------------------------------------
 [mqtt]
-host = "10.0.0.213"
+host = "192.168.1.11"
 # port = 1883
 username = "frigate_mqtt"
 
@@ -36,11 +36,11 @@ password = "CHANGE-ME"
 # ---------------------------------------------------------------------------
 [frigate]
 # Used for click-through when you click a popup.
-ui_url = "https://10.0.0.193:8971"
+ui_url = "https://192.168.1.10:8971"
 
 # go2rtc API. Must be reachable from this desktop - verify with:
-#   curl http://10.0.0.193:1984/api/streams
-go2rtc_url = "http://10.0.0.193:1984"
+#   curl http://192.168.1.10:1984/api/streams
+go2rtc_url = "http://192.168.1.10:1984"
 
 
 # ---------------------------------------------------------------------------
@@ -157,15 +157,15 @@ labels = ["person", "bird"]
 # ---------------------------------------------------------------------------
 # `name`   must match the Frigate camera name exactly - it is compared against
 #          `after.camera` in the MQTT event. Check yours with:
-#            mosquitto_sub -h 10.0.0.213 -u frigate_mqtt -P '<pw>' -t 'frigate/events' -v
+#            mosquitto_sub -h 192.168.1.11 -u frigate_mqtt -P '<pw>' -t 'frigate/events' -v
 # `stream` is the go2rtc stream name. List yours with:
-#            curl http://10.0.0.193:1984/api/streams
+#            curl http://192.168.1.10:1984/api/streams
 #          Sub streams are the right choice for a small popup: lower bitrate and
 #          they connect noticeably faster than the main streams.
 #
 #          Note the Frigate names and the go2rtc stream names do NOT match on this
-#          setup: Frigate calls them front_doorbell / garage_camera / side_camera while
-#          go2rtc calls the same feeds doorbell / garage / sidedoor.
+#          setup: Frigate may call a camera front_doorbell while go2rtc calls the same
+#          feed doorbell. The name/stream pair below bridges the two.
 #
 #          Run `cargo run --example discover_cameras` to list the Frigate names.
 #
@@ -184,13 +184,13 @@ name = "side_camera"
 stream = "sidedoor_sub"
 
 [[cameras]]
-name = "indoor_garage"
-stream = "indoor_garage_sub"
-enabled = false            # indoor cameras off by default - you are usually the person
+name = "shed"
+stream = "shed_sub"
+enabled = false            # a camera you own but do not want popping up
 
 [[cameras]]
-name = "indoor_living_room"
-stream = "indoor_living_room_sub"
+name = "patio"
+stream = "patio_sub"
 enabled = false
 
 # Fuller example of the per-camera overrides:

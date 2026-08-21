@@ -28,9 +28,10 @@ Last updated 2026-08-20
 - **Regression tests test the mechanism, not the output.** A test asserting a generated
   script *contains* the right CSS passed while the script was throwing before it ever
   ran. Assert the behaviour that broke.
-- **Test fixtures use real values from this deployment** — `front_doorbell`, not
-  `doorbell`. Fixtures that drift from reality hide bugs. Use `testutil::config_from`,
-  never a hand-rolled temp directory.
+- **Test fixtures mirror a real deployment's shape** — a Frigate camera name that
+  differs from its go2rtc stream name (`front_doorbell` vs `doorbell_sub`), because that
+  mismatch is exactly where bugs hide. Fixtures that drift from reality hide bugs. Use
+  `testutil::config_from`, never a hand-rolled temp directory.
 - **Resist over-engineering.** No abstraction before its second use, no trait "for
   flexibility", no config knob nobody will turn. Delete dead code rather than commenting
   it out.
