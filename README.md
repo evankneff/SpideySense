@@ -12,6 +12,7 @@ you a camera for a few seconds and gets out of the way.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/rust-1.82+-orange.svg)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-blue.svg)
+[![Release](https://img.shields.io/github/v/release/evankneff/SpideySense)](https://github.com/evankneff/SpideySense/releases/latest)
 
 <p align="center">
   <img src="assets/demo.gif" alt="A camera popup appearing in the corner of the desktop and closing itself" width="820">
@@ -22,6 +23,22 @@ you a camera for a few seconds and gets out of the way.
 </p>
 
 > The crate and binary are named `frigate-popup`; SpideySense is the project name.
+
+## Download
+
+Grab the latest build from [Releases](https://github.com/evankneff/SpideySense/releases/latest):
+
+| File | Use when |
+|---|---|
+| `SpideySense_<version>_x64-setup.exe` | Normal install. Config and logs in `%APPDATA%\frigate-popup\`. |
+| `SpideySense_<version>_x64-portable.exe` | Single binary. Drop a `config.toml` beside it to run fully portable. |
+
+Windows x64 only - the focus-suppression path is Win32-specific, so other platforms are out
+of scope by design. The binaries are unsigned, so SmartScreen will warn on first launch;
+SHA256 checksums are published with every release.
+
+There is no main window. On first run with no config the app writes a commented starter
+`config.toml`, tells you where it went, and exits.
 
 ## The hard part: never stealing focus
 
