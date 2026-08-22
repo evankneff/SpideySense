@@ -2,6 +2,31 @@ This is meant to be a CONCISE list of changes to track as we develop this projec
 
 ---
 
+## 2026-08-21 - macOS: non-activating popups
+
+- New `src-tauri/src/macos.rs`, `#[cfg(target_os = "macos")]`. `WS_EX_NOACTIVATE`'s
+  "click does not activate the app" half has no macOS style flag; it requires the window
+  to *be* an `NSPanel` with `NSWindowStyleMaskNonactivatingPanel` in its mask. Setting
+  that bit on a plain `NSWindow` does not stick - no error, no log - so the popup's class
+  is swapped at runtime (`object_setClass`) to a bespoke `NSPanel` subclass, once, before
+  first show. `.focusable(false)` (free, portable, maps to `WS_EX_NOACTIVATE` on Windows
+  too) covers the other half. App-wide `ActivationPolicy::Accessory` covers the
+  `WS_EX_TOOLWINDOW` half (no per-window equivalent on macOS - see `macos.rs` doc comment).
+- `windows::show` now dispatches to `-orderFrontRegardless` on macOS instead of
+  `WebviewWindow::show()`, which is a no-op while the app is inactive (always, for this
+  window) and would otherwise leave the popup never appearing.
+- The camera picker (`picker.rs`) is untouched - it deliberately takes focus and is a
+  different window type.
+- Built on findings from a standalone spike (`FINDINGS.md`, not in this repo) that
+  measured the class-swap requirement against a Tauri reference app before any of this
+  landed here. See `ai/roadmaps/2026-08-21-macos-port.md`.
+- Verified: `cargo test` 68/68 (unchanged from the Windows baseline), `cargo check`
+  clean, and a `--preview` launch logs
+  `class=SpideySenseNonactivatingPanel mask=0x8084 level=25 key=false
+  app_active=false policy=NSApplicationActivationPolicy(1)` - configuration confirmed at
+  runtime. **Not verified: that a click on the popup actually leaves focus alone.** That
+  needs a mouse and an unlocked screen; see `MACOS_RUNBOOK.md`.
+
 ## 2026-08-21 - Reload config from the tray
 
 - New tray item re-reads and validates `config.toml`, swaps it in, and rebuilds the menu.

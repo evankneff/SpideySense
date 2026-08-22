@@ -8,6 +8,8 @@ pub mod config;
 pub mod events;
 mod lifecycle;
 mod logging;
+#[cfg(target_os = "macos")]
+mod macos;
 mod mqtt;
 mod paths;
 mod picker;
@@ -244,7 +246,9 @@ fn spawn_sweeper<R: tauri::Runtime>(
 }
 
 fn start(config: Arc<Config>, mode: cli::Mode) -> Result<()> {
-    let app = tauri::Builder::default()
+    // `mut` is only needed for `set_activation_policy` below, which is macOS-only.
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             // Desktop-only launcher; the argument is ignored on Windows but the plugin
@@ -314,6 +318,14 @@ fn start(config: Arc<Config>, mode: cli::Mode) -> Result<()> {
         })
         .build(tauri::generate_context!())
         .context("building the Tauri application")?;
+
+    // No Dock icon, no Cmd-Tab entry, no menu bar of our own - the app-wide half of
+    // `WS_EX_TOOLWINDOW` (macOS decides taskbar/Dock presence per-application, not
+    // per-window). `Accessory` rather than `Prohibited`: a prohibited app cannot be
+    // activated at all, which would break the tray icon's own menu. Tauri defaults to
+    // `Regular`, and this is the only supported way to change it.
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
     app.run(|_app, event| {
         // The app lives in the tray. Popups closing must never take the process with

@@ -290,6 +290,12 @@ pub fn open<R: Runtime>(
         .skip_taskbar(true)
         .resizable(false)
         .focused(false)
+        // Never becomes the key window, on any platform. Free half of `WS_EX_NOACTIVATE`
+        // on macOS (tao reads this back from `-canBecomeKeyWindow`); on Windows it maps
+        // straight onto `WS_EX_NOACTIVATE` too, so `suppress_activation` below is really
+        // only doing the *other* half there (and the whole of it on macOS - see
+        // `macos.rs`).
+        .focusable(false)
         .shadow(true)
         .visible(false)
         .initialization_script(init_script)
@@ -306,8 +312,27 @@ pub fn open<R: Runtime>(
         warn!("could not apply the no-activate window style: {e:#}");
     }
 
-    window.show().context("showing the popup")?;
+    show(&window).context("showing the popup")?;
     Ok(window)
+}
+
+/// Show without taking focus.
+///
+/// On macOS this is `-orderFrontRegardless` rather than `WebviewWindow::show()`, which
+/// reaches tao's `makeKeyAndOrderFront:` and, worse, is a no-op while the app is inactive
+/// (which for this window is always) - see `macos.rs::show`. Windows has no such trap:
+/// `WS_EX_NOACTIVATE` already makes `ShowWindow` behave, so `window.show()` is fine there.
+#[cfg(target_os = "macos")]
+fn show<R: Runtime>(window: &WebviewWindow<R>) -> Result<()> {
+    let mtm = objc2::MainThreadMarker::new()
+        .ok_or_else(|| anyhow!("show must run on the main thread"))?;
+    crate::macos::show(window, mtm);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show<R: Runtime>(window: &WebviewWindow<R>) -> Result<()> {
+    window.show().context("showing the popup")
 }
 
 /// Adds `WS_EX_NOACTIVATE` so the popup can never take keyboard focus.
@@ -334,7 +359,18 @@ fn suppress_activation<R: Runtime>(window: &WebviewWindow<R>) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+/// Converts the window to a non-activating `NSPanel`. See `macos.rs` for why the
+/// style-mask bit alone does not survive on a plain `NSWindow`.
+#[cfg(target_os = "macos")]
+fn suppress_activation<R: Runtime>(window: &WebviewWindow<R>) -> Result<()> {
+    let mtm = objc2::MainThreadMarker::new()
+        .ok_or_else(|| anyhow!("suppress_activation must run on the main thread"))?;
+    crate::macos::convert_to_nonactivating_panel(window, mtm);
+    debug!("{}", crate::macos::diagnostics(window, mtm));
+    Ok(())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn suppress_activation<R: Runtime>(_window: &WebviewWindow<R>) -> Result<()> {
     Ok(())
 }

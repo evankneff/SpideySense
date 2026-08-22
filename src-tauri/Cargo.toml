@@ -41,6 +41,28 @@ windows = { version = "0.61.3", features = [
     "Win32_System_Threading",
 ] }
 
+# macOS analogue of the block above. Same versions vellum uses, and objc2-app-kit 0.3.2
+# is already in this lockfile as a transitive dependency of tao, so this adds a direct
+# edge to a crate that is already there rather than a genuinely new one to compile.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSGeometry",
+    "NSString",
+] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSPanel",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSScreen",
+    "NSWindow",
+    "NSWorkspace",
+    "objc2-core-foundation",
+] }
+
 [profile.release]
 codegen-units = 1
 lto = true
