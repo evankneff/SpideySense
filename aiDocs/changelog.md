@@ -2,6 +2,32 @@ This is meant to be a CONCISE list of changes to track as we develop this projec
 
 ---
 
+## 2026-08-24 - Hotkey cycles the picker instead of toggling it
+
+- The global hotkey is now three-state: advance the selection if the picker is open,
+  close the newest pinned view if one is on screen, otherwise open the picker. Alt+Tab
+  shape, so the whole interaction is one hand: tap, tap, Enter.
+- Advancing is a Tauri event the picker page listens for, calling its existing `move(1)`.
+  The hotkey is a second input source for the selection logic that already drove the
+  arrow keys, so the two cannot drift apart.
+- Detection popups are excluded from the close rule; they expire on their own, and
+  closing them here would make the key's meaning depend on whether a detection had just
+  fired. `Popups::newest_pinned` skips them.
+- `commands::dismiss_pinned` extracted so the hotkey closes a popup through the same
+  forget-close-restack path as its close button rather than a parallel implementation.
+- Consequence: a second press no longer dismisses the picker. Esc and click-away do, and
+  the picker's hint line says so.
+- Verified by pressing the key against the running app.
+- 72 unit tests, up from 68.
+
+## 2026-08-24 - Hotkey conflict diagnosed, not worked around
+
+- `F20` briefly failed to register: another application owned it. Confirmed with a direct
+  `RegisterHotKey` probe returning `ERROR_HOTKEY_ALREADY_REGISTERED` (1409) for F20 while
+  F17 was free, which ruled out a teardown race from the previous process.
+- No code change. The app already degrades correctly - logs the conflict and carries on
+  without the hotkey.
+
 ## 2026-08-21 - Reload config from the tray
 
 - New tray item re-reads and validates `config.toml`, swaps it in, and rebuilds the menu.

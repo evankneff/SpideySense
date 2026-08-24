@@ -109,6 +109,18 @@ impl Popups {
         self.entries.is_empty()
     }
 
+    /// Camera of the most recently opened pinned popup, if any.
+    ///
+    /// Entries are oldest first, so the last pinned one is the newest. Detection popups
+    /// are skipped deliberately: they close themselves, so the hotkey never needs to.
+    pub fn newest_pinned(&self) -> Option<String> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|e| e.pinned)
+            .map(|e| e.camera.clone())
+    }
+
     pub fn has(&self, camera: &str) -> bool {
         self.entries.iter().any(|e| e.camera == camera)
     }
@@ -602,5 +614,52 @@ mod tests {
         let mut popups = Popups::new();
         popups.note("front_doorbell", Signal::Ended, &cfg(), Instant::now());
         assert!(popups.is_empty());
+    }
+
+    // --- hotkey: which popup a press closes ------------------------------------
+
+    /// Builds a stack in the order given, oldest first.
+    fn stack(entries: &[(&str, bool)]) -> Popups {
+        let t0 = Instant::now();
+        let mut popups = Popups::new();
+        for (camera, pinned) in entries {
+            popups.entries.push(Entry {
+                camera: (*camera).into(),
+                timing: Timing::new(&cfg(), t0),
+                hovered: false,
+                pinned: *pinned,
+            });
+        }
+        popups
+    }
+
+    #[test]
+    fn the_hotkey_closes_the_newest_pinned_popup_not_the_oldest() {
+        // Entries are oldest first, so peeling the stack has to work from the back.
+        let popups = stack(&[("front_doorbell", true), ("garage_camera", true)]);
+        assert_eq!(popups.newest_pinned().as_deref(), Some("garage_camera"));
+    }
+
+    #[test]
+    fn the_hotkey_ignores_detection_popups() {
+        // A detection popup expires on its own. If the hotkey closed it, the key would
+        // mean different things depending on whether something had just been detected.
+        let popups = stack(&[("front_doorbell", false), ("garage_camera", false)]);
+        assert_eq!(popups.newest_pinned(), None);
+    }
+
+    #[test]
+    fn a_pinned_popup_is_found_underneath_a_newer_detection() {
+        let popups = stack(&[("front_doorbell", true), ("garage_camera", false)]);
+        assert_eq!(
+            popups.newest_pinned().as_deref(),
+            Some("front_doorbell"),
+            "a detection stacked on top must not hide the pinned view the key should close"
+        );
+    }
+
+    #[test]
+    fn nothing_on_screen_means_nothing_to_close() {
+        assert_eq!(Popups::new().newest_pinned(), None);
     }
 }

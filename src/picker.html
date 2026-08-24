@@ -57,7 +57,7 @@
 
 <header>
   <h1>Show camera</h1>
-  <span class="hint">&uarr;&darr; select &middot; Enter open &middot; Esc close</span>
+  <span class="hint">&uarr;&darr; or hotkey select &middot; Enter open &middot; Esc close</span>
 </header>
 <ul id="list"></ul>
 
@@ -120,6 +120,13 @@
     const cam = cameras[i];
     if (!cam) return;
     call("picker_choose", { camera: cam.name });
+  }
+
+  // The global hotkey drives the same selection as ArrowDown, so tapping it repeatedly
+  // cycles the list without moving your hand to the arrow keys.
+  const listen = window.__TAURI__?.event?.listen;
+  if (listen) {
+    try { listen("picker-advance", () => move(1)); } catch (_) {}
   }
 
   document.addEventListener("keydown", (ev) => {

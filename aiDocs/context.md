@@ -55,7 +55,7 @@ Added beyond the original scope: a tray camera picker and a global-hotkey keyboa
 picker (both open pinned live views), `--preview` and `--simulate` flags, and two example
 binaries (`discover_cameras`, `publish_test_event`).
 
-68 unit tests, clippy clean with `-D warnings`, verified in CI on Windows.
+72 unit tests, clippy clean with `-D warnings`, verified in CI on Windows.
 
 **One behaviour is implemented and unit-tested but has never been observed firing
 against real hardware.** Do not claim it works:

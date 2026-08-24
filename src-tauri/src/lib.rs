@@ -193,7 +193,7 @@ fn register_hotkey<R: tauri::Runtime>(app: &tauri::AppHandle<R>, config: ConfigS
             .with_handler(move |app, _shortcut, event| {
                 // Pressed only. Acting on Released too would toggle twice per keypress.
                 if event.state() == ShortcutState::Pressed {
-                    picker::toggle(app, &for_handler.load());
+                    picker::hotkey(app, &for_handler.load());
                 }
             })
             .build(),

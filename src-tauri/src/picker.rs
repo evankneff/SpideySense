@@ -10,8 +10,8 @@ use crate::config::Config;
 use crate::windows::Rect;
 use anyhow::{anyhow, Context, Result};
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl,
+    WebviewWindowBuilder, WindowEvent,
 };
 use tracing::{debug, info, warn};
 
@@ -44,10 +44,33 @@ pub fn close<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Opens the picker, or closes it if already open. Bound to the global hotkey.
-pub fn toggle<R: Runtime>(app: &AppHandle<R>, config: &Config) {
+/// The event the picker page listens for to move its selection down one row.
+pub const ADVANCE_EVENT: &str = "picker-advance";
+
+/// The global hotkey, which means one of three things depending on what is on screen.
+///
+/// 1. Picker already open: advance the selection, so repeated taps cycle the list and
+///    Enter opens the highlighted camera. This is the Alt+Tab shape.
+/// 2. A pinned popup on screen: close the newest one. Pinned views never time out, so
+///    they are the only ones that need a key to dismiss them.
+/// 3. Otherwise: open the picker.
+///
+/// Detection popups are deliberately not closed by this key. They expire on their own,
+/// and letting the hotkey dismiss them would make its meaning depend on whether a
+/// detection happened to be on screen - press it expecting the picker, silently dismiss
+/// an alert instead.
+///
+/// Dismissing the picker itself is Esc or click-away, not this key: a second tap has to
+/// mean "next camera" for cycling to work at all.
+pub fn hotkey<R: Runtime>(app: &AppHandle<R>, config: &Config) {
     if is_open(app) {
-        close(app);
+        advance(app);
+        return;
+    }
+
+    if let Some(camera) = newest_pinned(app) {
+        debug!(%camera, "hotkey closing the newest pinned popup");
+        crate::commands::dismiss_pinned(app, &camera);
         return;
     }
 
@@ -60,6 +83,25 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, config: &Config) {
             warn!("could not open the camera picker: {e:#}");
         }
     });
+}
+
+/// Tells the open picker page to move its selection down one row.
+///
+/// An event rather than a command because the page already owns the selection logic,
+/// including the wrap - this just drives it from a second input source.
+fn advance<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window(LABEL) else {
+        return;
+    };
+    if let Err(e) = window.emit(ADVANCE_EVENT, ()) {
+        warn!("could not advance the picker selection: {e:#}");
+    }
+}
+
+/// Newest pinned popup on screen, if any.
+fn newest_pinned<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    app.try_state::<crate::AppState>()
+        .and_then(|state| state.popups().newest_pinned())
 }
 
 fn open<R: Runtime>(app: &AppHandle<R>, config: &Config) -> Result<()> {

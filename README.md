@@ -70,7 +70,7 @@ that exception cannot leak back into detection popups.
 - **Do-not-disturb**, toggled from the tray, with a distinct paused tray icon.
 - **Reload config from the tray** without restarting, for everything that is not already
   bound to a live connection.
-- **Global-hotkey camera picker** - keyboard-navigable, opens any camera on demand.
+- **Global-hotkey camera picker** - one key opens it, cycles the list, and closes what it opened.
 - **Click-through to Frigate** for the full event and recording.
 - **No audio at all.** No audio transceiver is negotiated - quiet by construction, not by
   muting.
@@ -93,7 +93,7 @@ Decision filters, applied in order:
 Written in Rust ([Tauri 2](https://tauri.app)), no frontend build step - the popup page is
 vanilla HTML in `src/`.
 
-- **68 unit tests**, `cargo clippy -- -D warnings` clean, verified in CI on Windows.
+- **72 unit tests**, `cargo clippy -- -D warnings` clean, verified in CI on Windows.
 - **Pure logic is separated from I/O**, so trigger decisions and popup lifecycle are unit
   tested without a broker or a window.
 - **Window work is planned under the lock and applied outside it**, so a slow window call
@@ -337,15 +337,37 @@ stylesheet, if the bundled page ever misbehaves.
 ## Keyboard camera picker
 
 Press **F20** (configurable via `[hotkey] binding`) anywhere to open a keyboard-navigable
-camera list. Press it again to dismiss.
+camera list.
+
+The hotkey is an Alt+Tab-shaped cycle rather than a toggle. It means one of three things
+depending on what is on screen:
+
+| State | A press does |
+|---|---|
+| Picker open | advance the selection one row, wrapping at the end |
+| A pinned view open | close the newest one |
+| Neither | open the picker |
+
+So the whole interaction is one hand without leaving the hotkey: tap to open, tap to
+cycle, Enter to open the camera, tap again to close it.
+
+Detection popups are deliberately excluded from the close rule. They expire on their own,
+and letting the hotkey dismiss them would make its meaning depend on whether something had
+just been detected - press it expecting the picker and silently dismiss an alert instead.
+
+Because a second press means "next camera", it no longer dismisses the picker; Esc and
+click-away do.
 
 | Key | Action |
 |---|---|
-| Up / Down | move the selection, wrapping at both ends |
+| Up / Down, or the hotkey | move the selection, wrapping at both ends |
 | Home / End | first / last camera |
 | 1-9 | jump straight to that camera and open it |
 | Enter | open the selected camera |
 | Esc | dismiss |
+
+The hotkey drives the page's own selection function rather than a second copy of it, so
+it and the arrow keys cannot drift apart.
 
 It opens just above the tray, at the bottom-right of the primary monitor's work area —
 the same place a tray context menu appears. Clicking away dismisses it, the way any

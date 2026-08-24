@@ -22,20 +22,30 @@ pub fn popup_open_ui<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>, 
 #[tauri::command]
 pub fn popup_dismiss<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>, camera: String) {
     info!(%camera, "popup dismissed from its close button");
+    dismiss(&app, &state, &camera);
+}
 
+/// Closes a popup the way its own close button would, from somewhere that has only an
+/// `AppHandle` - the global hotkey, for instance.
+pub fn dismiss_pinned<R: Runtime>(app: &AppHandle<R>, camera: &str) {
+    let state = app.state::<AppState>();
+    dismiss(app, &state, camera);
+}
+
+fn dismiss<R: Runtime>(app: &AppHandle<R>, state: &State<'_, AppState>, camera: &str) {
     // Forget it first: if the window close raced the sweeper, the sweeper would
     // otherwise try to restack a popup that no longer exists.
     {
         let mut popups = state.popups();
-        popups.forget(&camera);
+        popups.forget(camera);
     }
 
-    if let Some(window) = app.get_webview_window(&windows::label_for(&camera)) {
+    if let Some(window) = app.get_webview_window(&windows::label_for(camera)) {
         if let Err(e) = window.close() {
             warn!(%camera, "could not close the popup: {e:#}");
         }
     }
-    restack(&app, &state);
+    restack(app, state);
 }
 
 /// Pauses or resumes the auto-close while the pointer is over the popup.
