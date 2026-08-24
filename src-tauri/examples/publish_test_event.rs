@@ -5,9 +5,16 @@
 //! command line or printed.
 //!
 //!     cargo run --example publish_test_event -- doorbell person 5
+//!     cargo run --example publish_test_event -- doorbell person 5 --overlap
 //!
 //! Arguments: CAMERA (default doorbell), LABEL (default person), END_AFTER_SECS (default 5;
 //! 0 sends only the `new` event). An `update` is sent halfway through.
+//!
+//! `--overlap` reproduces what Frigate actually does when it re-identifies one person
+//! mid-track: it opens a second event while the first is still live, then ends the first
+//! while the person is still on screen. Captured from real hardware on 2026-08-24. The app
+//! must ignore that first `end` - honouring it closed the popup out from under someone who
+//! never left, and the cooldown then stopped the second event reopening it.
 
 use anyhow::{Context, Result};
 use frigate_popup_lib::config::Config;
@@ -16,7 +23,8 @@ use std::time::Duration;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
+    let overlap = std::env::args().any(|a| a == "--overlap");
+    let mut args = std::env::args().skip(1).filter(|a| a != "--overlap");
     let camera = args.next().unwrap_or_else(|| "doorbell".into());
     let label = args.next().unwrap_or_else(|| "person".into());
     let end_after: u64 = args
@@ -52,7 +60,7 @@ async fn main() -> Result<()> {
     });
 
     let id = format!("test-{camera}-{label}");
-    let base = |kind: &str, stationary: bool| {
+    let base = |kind: &str, stationary: bool, id: &str| {
         serde_json::json!({
             "type": kind,
             "before": null,
@@ -76,26 +84,60 @@ async fn main() -> Result<()> {
         .to_string()
     };
 
-    println!("publishing `new` for {camera}/{label} to {topic}");
-    client
-        .publish(&topic, QoS::AtLeastOnce, false, base("new", false))
-        .await
-        .context("publishing the new event")?;
+    if overlap {
+        let (a, b) = (format!("{id}-a"), format!("{id}-b"));
+        let step = Duration::from_secs(3);
 
-    if end_after > 0 {
-        tokio::time::sleep(Duration::from_secs(end_after / 2)).await;
-        println!("publishing `update`");
+        println!("[a] new   - opens the popup");
         client
-            .publish(&topic, QoS::AtLeastOnce, false, base("update", false))
-            .await
-            .context("publishing the update event")?;
+            .publish(&topic, QoS::AtLeastOnce, false, base("new", false, &a))
+            .await?;
 
-        tokio::time::sleep(Duration::from_secs(end_after - end_after / 2)).await;
-        println!("publishing `end`");
+        tokio::time::sleep(step).await;
+        println!("[b] new   - Frigate re-identifies the same person");
         client
-            .publish(&topic, QoS::AtLeastOnce, false, base("end", false))
+            .publish(&topic, QoS::AtLeastOnce, false, base("new", false, &b))
+            .await?;
+
+        tokio::time::sleep(step).await;
+        println!("[a] end   - EXPECT IGNORED, b is still tracking");
+        client
+            .publish(&topic, QoS::AtLeastOnce, false, base("end", false, &a))
+            .await?;
+
+        tokio::time::sleep(step).await;
+        println!("[b] update - the person is still there");
+        client
+            .publish(&topic, QoS::AtLeastOnce, false, base("update", false, &b))
+            .await?;
+
+        tokio::time::sleep(step).await;
+        println!("[b] end   - EXPECT HONOURED, nothing is tracking now");
+        client
+            .publish(&topic, QoS::AtLeastOnce, false, base("end", false, &b))
+            .await?;
+    } else {
+        println!("publishing `new` for {camera}/{label} to {topic}");
+        client
+            .publish(&topic, QoS::AtLeastOnce, false, base("new", false, &id))
             .await
-            .context("publishing the end event")?;
+            .context("publishing the new event")?;
+
+        if end_after > 0 {
+            tokio::time::sleep(Duration::from_secs(end_after / 2)).await;
+            println!("publishing `update`");
+            client
+                .publish(&topic, QoS::AtLeastOnce, false, base("update", false, &id))
+                .await
+                .context("publishing the update event")?;
+
+            tokio::time::sleep(Duration::from_secs(end_after - end_after / 2)).await;
+            println!("publishing `end`");
+            client
+                .publish(&topic, QoS::AtLeastOnce, false, base("end", false, &id))
+                .await
+                .context("publishing the end event")?;
+        }
     }
 
     // Give the event loop a moment to flush before the process exits.

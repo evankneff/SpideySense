@@ -55,12 +55,15 @@ Added beyond the original scope: a tray camera picker and a global-hotkey keyboa
 picker (both open pinned live views), `--preview` and `--simulate` flags, and two example
 binaries (`discover_cameras`, `publish_test_event`).
 
-72 unit tests, clippy clean with `-D warnings`, verified in CI on Windows.
+78 unit tests, clippy clean with `-D warnings`, verified in CI on Windows.
 
 **One behaviour is implemented and unit-tested but has never been observed firing
 against real hardware.** Do not claim it works:
 
 - The `stationary` close path. No tracked object has gone motionless in frame yet.
+  Narrowed 2026-08-24: `stationary` **is** present in Frigate's payload, so the code is not
+  dead against this version. `motionless_count` peaked at 15 in a live capture, well below
+  the threshold Frigate needs (defaults to 10x detect fps). Still do not claim it works.
 
 Retired 2026-08-21: a live mid-session MQTT reconnect **has** now been observed twice,
 correlated against Windows Kernel-Power events. Both drops were sleep/resume, not broker

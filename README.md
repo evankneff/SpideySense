@@ -93,7 +93,7 @@ Decision filters, applied in order:
 Written in Rust ([Tauri 2](https://tauri.app)), no frontend build step - the popup page is
 vanilla HTML in `src/`.
 
-- **72 unit tests**, `cargo clippy -- -D warnings` clean, verified in CI on Windows.
+- **78 unit tests**, `cargo clippy -- -D warnings` clean, verified in CI on Windows.
 - **Pure logic is separated from I/O**, so trigger decisions and popup lifecycle are unit
   tested without a broker or a window.
 - **Window work is planned under the lock and applied outside it**, so a slow window call
@@ -113,7 +113,11 @@ fixtures. Each fix added a regression test for the *mechanism*, not just the out
 
 One behaviour is implemented and unit tested but has **never been observed firing against
 real hardware**, and is documented as such rather than claimed as working: the `stationary`
-close path.
+close path. A packet capture on 2026-08-24 confirmed `stationary` *is* present in Frigate's
+payload, so the code is not dead against this version - but `motionless_count` peaked at 15
+across the capture, far below the threshold Frigate needs to flip the flag (it defaults to
+10x the detect fps). The path is correct as far as anyone can tell and simply has not had
+the chance to fire.
 
 Mid-session MQTT reconnect *has* now been observed in the wild. Every drop so far has been
 a sleep/resume transition rather than a broker failure: the connection dies as the machine
@@ -233,9 +237,41 @@ Frigate publishes its own camera name in the MQTT event; go2rtc knows nothing ab
 config bridges the two. Most streams expose `_main` and `_sub` variants - popups use `_sub`,
 since a 480x270 window has no use for a 4K main stream.
 
+`cargo run --example dump_events` prints raw event payloads, including whether a field is
+absent rather than false - every optional field carries `#[serde(default)]`, so the app's own
+log cannot tell those apart.
+
 Run `cargo run --example discover_cameras` to derive the Frigate names from retained MQTT
 topics. This needs no Frigate API auth, which matters because the HTTP API sits behind an
 authenticated port.
+
+### Frigate splits one person into overlapping events
+
+Frigate can re-identify a single person mid-track and open a **second** event while the
+first is still running, then end the first while the person is still on screen:
+
+```
+new  side_camera id=...rmci95
+new  side_camera id=...7ex720     <-- second event opens; the first is still live
+end  side_camera id=...rmci95     <-- first ends; nobody has left
+end  side_camera id=...7ex720
+```
+
+Treating that first `end` as "the object is gone" closes the popup out from under someone
+who never moved away, and the cooldown then stops the second event reopening it - so the
+window vanishes and cannot come back. `events::LiveEvents` tracks which event ids are still
+running per camera, and an `end` only starts the linger countdown when it is the last one.
+
+Two cases matter as much as the main one: an `end` for an event the app never saw start is
+still honoured, because the app may have started mid-event; and an event that stops
+reporting ages out after five minutes, so a Frigate restart cannot leave a phantom event
+suppressing every genuine `end` for that camera.
+
+Reproduce it without waiting for a person:
+
+```powershell
+cargo run --example publish_test_event -- side_camera person 5 --overlap
+```
 
 ### WebRTC transport
 

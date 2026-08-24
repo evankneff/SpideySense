@@ -205,13 +205,23 @@ pub fn dispatch<R: Runtime>(ctx: &Context<R>, event: &FrigateEvent) {
     let config = config.as_ref();
     let camera = &event.after.camera;
 
-    let decision = {
+    let (decision, ended_last, still_live) = {
         let mut triggers = lock("trigger state", &ctx.triggers);
         let decision = triggers.evaluate(config, event, now);
         if let Decision::Fire { camera, .. } = &decision {
             triggers.record_fired(camera, now);
         }
-        decision
+
+        // Track which events are running before deciding what an `end` means.
+        let ended_last = match event.event_type {
+            EventType::New | EventType::Update => {
+                triggers.saw_event(camera, &event.after.id, now);
+                false
+            }
+            EventType::End => triggers.event_ended(camera, &event.after.id, now),
+            EventType::Unknown => false,
+        };
+        (decision, ended_last, triggers.live_events(camera))
     };
 
     match &decision {
@@ -253,7 +263,20 @@ pub fn dispatch<R: Runtime>(ctx: &Context<R>, event: &FrigateEvent) {
     // Regardless of the trigger decision, keep any open popup for this camera in step
     // with what its object is doing.
     let signal = match event.event_type {
-        EventType::End => Some(Signal::Ended),
+        // Only the *last* event running on a camera means the object is gone. Frigate
+        // splits one person into overlapping events, so honouring the first `end` would
+        // close the popup while they are still standing there - and the cooldown would
+        // then stop the second event reopening it.
+        EventType::End if ended_last => Some(Signal::Ended),
+        EventType::End => {
+            debug!(
+                %camera,
+                event_id = %event.after.id,
+                still_live,
+                "end ignored; another event is still tracking on this camera"
+            );
+            None
+        }
         EventType::Update if event.after.stationary => Some(Signal::Stationary),
         EventType::Update => Some(Signal::Active),
         EventType::New | EventType::Unknown => None,

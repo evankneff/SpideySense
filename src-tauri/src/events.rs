@@ -152,10 +152,67 @@ impl fmt::Display for SkipReason {
 // Trigger state
 // ---------------------------------------------------------------------------
 
+/// How long an event with no updates is treated as dead, even without an `end`.
+///
+/// Frigate restarting mid-event, or an `end` lost on the wire, would otherwise leave a
+/// phantom event live forever and suppress every genuine `end` for that camera.
+const LIVE_EVENT_TTL: Duration = Duration::from_secs(300);
+
+/// Which Frigate events are still running, per camera.
+///
+/// Frigate can track one person as several *overlapping* events: it opens a second event
+/// while the first is still live, then ends the first while the person is still on screen.
+/// Observed on real hardware - two `new`s for one person before either `end`. Treating
+/// that first `end` as "the object is gone" closes the popup out from under someone who
+/// never left, and the cooldown then stops the second event reopening it.
+///
+/// This exists to tell the two cases apart: an `end` only means the object is gone when
+/// nothing else is still tracking on that camera.
+#[derive(Debug, Default)]
+pub struct LiveEvents {
+    per_camera: HashMap<String, HashMap<String, Instant>>,
+}
+
+impl LiveEvents {
+    /// Records that `event_id` is running on `camera`.
+    pub fn saw(&mut self, camera: &str, event_id: &str, now: Instant) {
+        let events = self.per_camera.entry(camera.to_string()).or_default();
+        events.insert(event_id.to_string(), now);
+        events.retain(|_, last| now.duration_since(*last) < LIVE_EVENT_TTL);
+    }
+
+    /// Ends `event_id`, returning true when nothing else is still running on this camera.
+    ///
+    /// True is the only case where the popup should start its linger countdown. An event
+    /// we never saw start returns true as well: the app may have started mid-event, and
+    /// honouring the `end` matches the behaviour from before this existed.
+    pub fn ended(&mut self, camera: &str, event_id: &str, now: Instant) -> bool {
+        let Some(events) = self.per_camera.get_mut(camera) else {
+            return true;
+        };
+        events.remove(event_id);
+        events.retain(|_, last| now.duration_since(*last) < LIVE_EVENT_TTL);
+
+        let last_one = events.is_empty();
+        if last_one {
+            self.per_camera.remove(camera);
+        }
+        last_one
+    }
+
+    /// How many events are still running on a camera. For logging.
+    pub fn live(&self, camera: &str) -> usize {
+        self.per_camera.get(camera).map_or(0, HashMap::len)
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Triggers {
     /// Last time a popup fired, per camera. Drives the cooldown.
     last_fired: HashMap<String, Instant>,
+    /// Events Frigate is still tracking, so an `end` for one of several overlapping
+    /// events does not close a popup the object has not actually left.
+    live: LiveEvents,
     paused: bool,
 }
 
@@ -170,6 +227,21 @@ impl Triggers {
 
     pub fn is_paused(&self) -> bool {
         self.paused
+    }
+
+    /// Notes that Frigate is tracking `event_id` on `camera`.
+    pub fn saw_event(&mut self, camera: &str, event_id: &str, now: Instant) {
+        self.live.saw(camera, event_id, now);
+    }
+
+    /// Ends `event_id`, returning true when nothing else is still tracking on `camera`.
+    pub fn event_ended(&mut self, camera: &str, event_id: &str, now: Instant) -> bool {
+        self.live.ended(camera, event_id, now)
+    }
+
+    /// How many events are still running on a camera. For logging.
+    pub fn live_events(&self, camera: &str) -> usize {
+        self.live.live(camera)
     }
 
     /// Notes that a popup fired, starting this camera's cooldown.
@@ -487,5 +559,97 @@ required_zones = ["walkway"]
     fn unknown_fields_from_a_newer_frigate_are_ignored() {
         let json = with_after(NEW_PERSON, "some_future_field", serde_json::json!({"a": 1}));
         assert!(serde_json::from_str::<FrigateEvent>(&json).is_ok());
+    }
+
+    // --- overlapping events ----------------------------------------------------
+    //
+    // Captured from real hardware on 2026-08-24: Frigate opened a second event on
+    // side_camera while the first was still live, then ended the first while the person
+    // was still on screen. The popup closed 15s later (linger_seconds) and the cooldown
+    // stopped the second event reopening it.
+
+    #[test]
+    fn ending_one_of_two_overlapping_events_does_not_end_the_camera() {
+        let t0 = Instant::now();
+        let mut live = LiveEvents::default();
+
+        live.saw("side_camera", "a", t0);
+        live.saw("side_camera", "b", t0);
+
+        assert!(
+            !live.ended("side_camera", "a", t0),
+            "the person is still tracked by event b, so the popup must not start lingering"
+        );
+        assert_eq!(live.live("side_camera"), 1);
+    }
+
+    #[test]
+    fn ending_the_last_event_ends_the_camera() {
+        let t0 = Instant::now();
+        let mut live = LiveEvents::default();
+        live.saw("side_camera", "a", t0);
+        live.saw("side_camera", "b", t0);
+
+        assert!(!live.ended("side_camera", "a", t0));
+        assert!(
+            live.ended("side_camera", "b", t0),
+            "nothing is tracking any more, so this end is the real one"
+        );
+        assert_eq!(live.live("side_camera"), 0);
+    }
+
+    #[test]
+    fn an_end_for_an_event_we_never_saw_start_is_honoured() {
+        // The app may have started mid-event. Suppressing this would leave a popup that
+        // only the watchdog could ever close.
+        let mut live = LiveEvents::default();
+        assert!(live.ended("side_camera", "unseen", Instant::now()));
+    }
+
+    #[test]
+    fn cameras_do_not_mask_each_others_events() {
+        let t0 = Instant::now();
+        let mut live = LiveEvents::default();
+        live.saw("side_camera", "a", t0);
+        live.saw("front_doorbell", "b", t0);
+
+        assert!(
+            live.ended("front_doorbell", "b", t0),
+            "another camera being busy must not keep this one alive"
+        );
+    }
+
+    #[test]
+    fn a_stale_event_stops_suppressing_ends() {
+        // Frigate restarting mid-event would otherwise leave a phantom event live and
+        // suppress every genuine end for that camera from then on.
+        let t0 = Instant::now();
+        let mut live = LiveEvents::default();
+        live.saw("side_camera", "phantom", t0);
+        live.saw("side_camera", "real", t0);
+
+        let later = t0 + LIVE_EVENT_TTL + Duration::from_secs(1);
+        assert!(
+            live.ended("side_camera", "real", later),
+            "the phantom aged out, so this end is the last one"
+        );
+    }
+
+    #[test]
+    fn an_update_keeps_an_event_from_going_stale() {
+        let t0 = Instant::now();
+        let mut live = LiveEvents::default();
+        live.saw("side_camera", "a", t0);
+        live.saw("side_camera", "b", t0);
+
+        // `a` keeps reporting, so it is still live well past the TTL from t0.
+        let later = t0 + LIVE_EVENT_TTL - Duration::from_secs(1);
+        live.saw("side_camera", "a", later);
+
+        let later_still = later + Duration::from_secs(2);
+        assert!(
+            !live.ended("side_camera", "b", later_still),
+            "a is still reporting, so b ending must not close the popup"
+        );
     }
 }

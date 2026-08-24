@@ -2,6 +2,28 @@ This is meant to be a CONCISE list of changes to track as we develop this projec
 
 ---
 
+## 2026-08-24 - Do not close a popup while the object is still tracked
+
+- Reported symptom: a popup vanished while a person was still in frame. It was not the
+  `stationary` path - that never fired.
+- Root cause, from a live MQTT capture: Frigate re-identifies one person mid-track and
+  opens a second event while the first is still live, then ends the first. The app took
+  that `end` as "object gone", lingered 15s and closed, and the 60s cooldown then stopped
+  the second event reopening the window.
+- `events::LiveEvents` tracks live event ids per camera; an `end` only produces
+  `Signal::Ended` when it is the last one. An `end` for an event never seen starting is
+  still honoured, and events age out after 5 minutes so a Frigate restart cannot leave a
+  phantom suppressing every future `end`.
+- Verified against the running app, not just tests: the repro logged `end ignored; another
+  event is still tracking still_live=1`, then `Ended` only once the second event finished.
+  Not yet confirmed against a naturally occurring split.
+- New `dump_events` example prints raw payloads, since `#[serde(default)]` makes an absent
+  field indistinguishable from `false` in the app's log. `publish_test_event --overlap`
+  reproduces the split on demand.
+- Stationary caveat narrowed, not retired: the field is present, but `motionless_count`
+  peaked at 15, far below Frigate's threshold. The path remains unexercised.
+- 78 unit tests, up from 72.
+
 ## 2026-08-24 - v0.2.0, and releases build themselves
 
 - Version bumped to 0.2.0 in `Cargo.toml` and `tauri.conf.json`.
