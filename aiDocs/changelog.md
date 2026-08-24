@@ -2,6 +2,17 @@ This is meant to be a CONCISE list of changes to track as we develop this projec
 
 ---
 
+## 2026-08-24 - v0.2.0, and releases build themselves
+
+- Version bumped to 0.2.0 in `Cargo.toml` and `tauri.conf.json`.
+- New `.github/workflows/release.yml`: pushing a `v*` tag builds the NSIS installer on
+  `windows-latest`, stages it alongside the portable exe, writes `SHA256SUMS.txt` and
+  publishes the release. A published binary is therefore reproducible from a tag rather
+  than hand-built on one laptop.
+- The workflow re-runs the test suite first: a tag can point at a commit that never went
+  through CI, so it does not assume the suite must have passed.
+- Upload is re-runnable - it attaches to an existing release instead of failing on retry.
+
 ## 2026-08-24 - Hotkey cycles the picker instead of toggling it
 
 - The global hotkey is now three-state: advance the selection if the picker is open,

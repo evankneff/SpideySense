@@ -1,0 +1,88 @@
+name: Release
+
+# Tagging is the trigger: push a v* tag and the installer is built, checksummed and
+# attached to a GitHub release, so a published release can never be a hand-built binary
+# nobody else can reproduce.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # A tag can point at a commit that never went through CI, so the suite runs again
+      # rather than trusting that it must have passed.
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test --all-targets
+
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Build the installer
+        working-directory: src-tauri
+        run: cargo tauri build
+
+      - name: Stage artifacts and checksums
+        id: stage
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $version = $tag.TrimStart("v")
+          $rel = "src-tauri/target/release"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          $setup = Get-ChildItem "$rel/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "no NSIS installer was produced" }
+
+          # Published under the product name; the crate and binary are frigate-popup.
+          Copy-Item $setup.FullName "dist/SpideySense_${version}_x64-setup.exe"
+          Copy-Item "$rel/frigate-popup.exe" "dist/SpideySense_${version}_x64-portable.exe"
+
+          Get-ChildItem dist -Filter *.exe | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content dist/SHA256SUMS.txt
+
+          Get-Content dist/SHA256SUMS.txt
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          # Re-runnable: attach to an existing release rather than failing on a retry.
+          $exists = gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag (Get-ChildItem dist | ForEach-Object { $_.FullName }) --clobber
+          } else {
+            gh release create $tag (Get-ChildItem dist | ForEach-Object { $_.FullName }) `
+              --title "SpideySense $tag" --generate-notes --latest
+          }
